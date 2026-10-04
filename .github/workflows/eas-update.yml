@@ -16,21 +16,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: mobile/package-lock.json
 
-      - name: 🚀 Setup Expo & EAS
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+      - name: 🚀 Install EAS CLI
+        run: npm install -g eas-cli
 
       - name: 📦 Install dependencies
-        working-directory: mobile
-        run: npm ci
+        run: |
+          cd mobile
+          npm ci
 
       - name: 📲 Publish EAS Update
-        working-directory: mobile
         env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           UPDATE_MESSAGE: ${{ github.event.head_commit.message }}
-        run: eas update --branch preview --message "$UPDATE_MESSAGE" --non-interactive
+        run: |
+          cd mobile
+          eas update --branch preview --message "$UPDATE_MESSAGE" --non-interactive
