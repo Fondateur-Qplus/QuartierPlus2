@@ -1,0 +1,70 @@
+{
+  "expo": {
+    "name": "QuartierPlus",
+    "slug": "quartierplus",
+    "owner": "quartierplus-bf",
+    "version": "1.0.0",
+    "scheme": "quartierplus",
+    "autolinking": {
+      "nativeModulesDir": "./modules"
+    },
+    "ios": {
+      "infoPlist": {
+        "LSApplicationQueriesSchemes": [
+          "whatsapp"
+        ],
+        "UIBackgroundModes": [
+          "audio"
+        ]
+      },
+      "bitcode": false
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "@livekit/react-native-expo-plugin",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "QuartierPlus utilise la caméra pour les rencontres vidéo du Grin.",
+          "microphonePermission": "QuartierPlus utilise le microphone pour la dictée vocale, le talkie-walkie et les échanges vidéo du Grin."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "QuartierPlus utilise le microphone pour la dictée vocale, le talkie-walkie et les échanges vidéo du Grin.",
+          "speechRecognitionPermission": "QuartierPlus convertit votre voix en texte pour dicter et naviguer dans l’application."
+        }
+      ],
+      "./plugins/withGrinPip",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "QuartierPlus accède à vos photos pour les joindre aux messages et annonces."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "QuartierPlus utilise la caméra pour scanner les billets d’événements."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "QuartierPlus utilise votre position pour afficher les annonces à proximité."
+        }
+      ],
+      "expo-sqlite",
+      "expo-secure-store",
+      "expo-web-browser",
+      "expo-asset",
+      "expo-notifications"
+    ],
+    "android": {
+      "package": "com.anonymous.quartierplus"
+    }
+  }
+}

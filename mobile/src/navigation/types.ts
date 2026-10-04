@@ -1,0 +1,53 @@
+import type { NavigatorScreenParams } from "@react-navigation/native";
+
+export type MainTabParamList = {
+  Accueil: undefined;
+  CarteSOS: { voiceSosRequestId?: string } | undefined;
+  Marche:
+    | {
+        voiceRequestId?: string;
+        voiceSearch?: string;
+        voiceCreateListing?: boolean;
+      }
+    | undefined;
+  Messages:
+    | {
+        voiceRequestId?: string;
+        voiceContactQuery?: string;
+      }
+    | undefined;
+  Talkie: undefined;
+  Grin: undefined;
+  Profil: undefined;
+  EspacePro: undefined;
+  Événements: undefined;
+};
+
+export type EventSummary = {
+  id: string;
+  organizer_id: string;
+  title: string;
+  description: string;
+  location_name: string;
+  event_date: string;
+  ticket_price: number;
+  total_capacity: number;
+  tickets_sold: number;
+  is_published: boolean;
+  latitude: number | null;
+  longitude: number | null;
+};
+
+export type EventsStackParamList = {
+  EventsHome: undefined;
+  EventDetail: { eventId: string };
+  MyTickets: undefined;
+  OrganizerScanner: undefined;
+};
+
+export type RootStackParamList = {
+  PhoneAuth: undefined;
+  CompleteProfile: undefined;
+  Main: NavigatorScreenParams<MainTabParamList>;
+  Checkout: undefined;
+};

@@ -1,0 +1,1725 @@
+import {
+  Bell,
+  CheckCircle2,
+  ChevronRight,
+  CreditCard,
+  Edit3,
+  Globe,
+  Lock,
+  LogOut,
+  MapPin,
+  PhoneCall,
+  Settings,
+  Shield,
+  Siren,
+  Star,
+  Trash2,
+  User,
+} from "lucide-react-native";
+import { useEffect, useRef, useState } from "react";
+import { useNavigation, type NavigationProp } from "@react-navigation/native";
+import {
+  openProfileStore,
+  type AppPreferences,
+  type ProfileStore,
+  type TrustedContact,
+} from "../storage/profileStore";
+import {
+  ActivityIndicator,
+  Appearance,
+  Alert,
+  Linking,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { useAuth } from "../context/AuthContext";
+import VoiceTextInput from "../components/VoiceTextInput";
+import { API_BASE_URL, apiFetch } from "../services/api";
+import type { RootStackParamList } from "../navigation/types";
+
+type Country = {
+  name: string;
+  code: string;
+  emergencyNumbers: {
+    police: string;
+    fire: string;
+    medical: string;
+  };
+};
+
+const COUNTRIES: Country[] = [
+  {
+    name: "Burkina Faso",
+    code: "BF",
+    emergencyNumbers: { police: "17", fire: "18", medical: "112" },
+  },
+  {
+    name: "Côte d'Ivoire",
+    code: "CI",
+    emergencyNumbers: { police: "110", fire: "180", medical: "185" },
+  },
+  {
+    name: "Mali",
+    code: "ML",
+    emergencyNumbers: { police: "17", fire: "18", medical: "15" },
+  },
+  {
+    name: "Sénégal",
+    code: "SN",
+    emergencyNumbers: { police: "17", fire: "18", medical: "1515" },
+  },
+];
+
+const EMERGENCY_SERVICES = [
+  { id: "police", name: "Police / Gendarmerie", icon: Shield },
+  { id: "fire", name: "Pompiers", icon: Siren },
+  { id: "medical", name: "SAMU / Urgences médicales", icon: PhoneCall },
+] as const;
+
+type UserProfile = {
+  name: string;
+  neighborhood: string;
+  phoneNumber: string;
+  role: "resident" | "relay";
+  reputationScore: number | null;
+  isVerified: boolean;
+  badge: string | null;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const normalizeProfile = (value: unknown): UserProfile | null => {
+  if (!isRecord(value)) return null;
+  const user = isRecord(value.user) ? value.user : value;
+  const rawRole = String(user.role ?? user.user_type ?? "").toLowerCase();
+  const rawScore =
+    user.reputation_score ?? user.reputationScore ?? user.score ?? null;
+  const score = rawScore === null ? null : Number(rawScore);
+
+  return {
+    name: String(user.name ?? user.full_name ?? user.username ?? ""),
+    neighborhood: String(
+      user.neighborhood ?? user.neighborhood_name ?? user.location ?? "",
+    ),
+    phoneNumber: String(user.phone_number ?? user.phone ?? ""),
+    role:
+      rawRole.includes("relay") || rawRole.includes("relais")
+        ? "relay"
+        : "resident",
+    reputationScore:
+      score !== null && Number.isFinite(score) ? score : null,
+    isVerified: user.is_verified === true || user.isVerified === true,
+    badge:
+      typeof user.badge === "string" && user.badge.length > 0
+        ? user.badge
+        : null,
+  };
+};
+
+const ACTIVITIES = [
+  { id: "listings", label: "Mes Annonces & Produits", icon: User },
+  { id: "services", label: "Mes Services proposés", icon: Settings },
+  { id: "alerts", label: "Mes Alertes & Signalements émis", icon: Siren },
+];
+
+export default function ProfileScreen() {
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const { isOffline, signOut, user } = useAuth();
+  const [selectedCountry, setSelectedCountry] = useState<Country>(COUNTRIES[3]);
+  const [countryMenuOpen, setCountryMenuOpen] = useState(false);
+  const [contacts, setContacts] = useState<TrustedContact[]>([]);
+  const [databaseReady, setDatabaseReady] = useState(false);
+  const [databaseError, setDatabaseError] = useState<string | null>(null);
+  const databaseRef = useRef<ProfileStore | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [preferences, setPreferences] = useState<AppPreferences>({
+    theme: "light",
+    language: "fr",
+    sosNotificationsEnabled: true,
+    defaultRadiusKm: 3,
+  });
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [draftNeighborhood, setDraftNeighborhood] = useState("");
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [editingContact, setEditingContact] =
+    useState<TrustedContact | null>(null);
+  const [contactName, setContactName] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  const [isContactModalVisible, setIsContactModalVisible] = useState(false);
+  const [isSavingContact, setIsSavingContact] = useState(false);
+  const [sosNotificationsEnabled, setSosNotificationsEnabled] = useState(true);
+  const [defaultRadius, setDefaultRadius] = useState("5 km");
+  const [isPhoneModalVisible, setIsPhoneModalVisible] = useState(false);
+  const [draftPhoneNumber, setDraftPhoneNumber] = useState("");
+  const [phoneOtp, setPhoneOtp] = useState("");
+  const [phoneOtpRequested, setPhoneOtpRequested] = useState(false);
+  const [isUpdatingPhone, setIsUpdatingPhone] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    void (async () => {
+      try {
+        const database = await openProfileStore();
+        const savedCountry = await database.getCountry();
+        const savedContacts = await database.getContacts();
+        const savedPreferences = await database.getPreferences();
+        if (!isMounted) return;
+        databaseRef.current = database;
+        setContacts(savedContacts);
+        setPreferences(savedPreferences);
+        Appearance.setColorScheme(savedPreferences.theme);
+        setSosNotificationsEnabled(savedPreferences.sosNotificationsEnabled);
+        setDefaultRadius(`${savedPreferences.defaultRadiusKm} km`);
+        if (savedCountry) {
+          const country = COUNTRIES.find(
+            (entry) => entry.code === savedCountry.code,
+          );
+          if (country) {
+            setSelectedCountry({
+              ...country,
+              emergencyNumbers: savedCountry.emergencyNumbers,
+            });
+          }
+        }
+        setDatabaseReady(true);
+      } catch (error) {
+        if (!isMounted) return;
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Impossible de charger les données locales.";
+        setDatabaseError(message);
+        Alert.alert("Stockage hors ligne indisponible", message);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [isOffline]);
+
+  useEffect(() => {
+    let isMounted = true;
+    void (async () => {
+      if (!API_BASE_URL) {
+        setProfileError(
+          "L'adresse du serveur n'est pas configurée (EXPO_PUBLIC_API_URL).",
+        );
+        return;
+      }
+      try {
+        const response = await apiFetch(`${API_BASE_URL}/v1/users/me`);
+        if (!response.ok) {
+          throw new Error(`Erreur de chargement du profil (${response.status}).`);
+        }
+        const normalized = normalizeProfile(await response.json());
+        if (!normalized) {
+          throw new Error("La réponse du profil est invalide.");
+        }
+        if (isMounted) {
+          setProfile(normalized);
+          setDraftName(normalized.name);
+          setDraftNeighborhood(normalized.neighborhood);
+          setProfileError(null);
+        }
+      } catch (error) {
+        if (!isMounted) return;
+        setProfileError(
+          error instanceof Error
+            ? error.message
+            : "Impossible de charger le profil.",
+        );
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.badge]);
+
+  const selectCountry = async (country: Country) => {
+    const database = databaseRef.current;
+    if (!database) {
+      Alert.alert(
+        "Stockage hors ligne indisponible",
+        databaseError ?? "Le stockage local n'est pas prêt.",
+      );
+      return;
+    }
+    try {
+      await database.setCountry({
+        code: country.code,
+        emergencyNumbers: country.emergencyNumbers,
+      });
+      setSelectedCountry(country);
+      setCountryMenuOpen(false);
+    } catch (error) {
+      Alert.alert(
+        "Enregistrement impossible",
+        error instanceof Error
+          ? error.message
+          : "Impossible d'enregistrer le pays et les numéros hors ligne.",
+      );
+    }
+  };
+
+  const saveProfile = async () => {
+    if (!API_BASE_URL) {
+      Alert.alert(
+        "Enregistrement impossible",
+        "L'adresse du serveur n'est pas configurée (EXPO_PUBLIC_API_URL).",
+      );
+      return;
+    }
+    const name = draftName.trim();
+    const neighborhood = draftNeighborhood.trim();
+    if (!name) {
+      Alert.alert("Profil incomplet", "Saisissez votre nom.");
+      return;
+    }
+    setIsSavingProfile(true);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/v1/users/me`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          neighborhood,
+          country_code: selectedCountry.code,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Erreur d'enregistrement du profil (${response.status}).`);
+      }
+      const responseText = await response.text();
+      let result: unknown = null;
+      if (responseText) {
+        try {
+          result = JSON.parse(responseText) as unknown;
+        } catch {
+          throw new Error("La réponse d'enregistrement du profil est invalide.");
+        }
+      }
+      const updatedProfile = normalizeProfile(result) ?? {
+        ...(profile ?? {
+          role: "resident" as const,
+          reputationScore: null,
+          isVerified: false,
+          phoneNumber: "",
+          badge: null,
+        }),
+        name,
+        neighborhood,
+      };
+      setProfile(updatedProfile);
+      setDraftName(updatedProfile.name);
+      setDraftNeighborhood(updatedProfile.neighborhood);
+      setIsEditingProfile(false);
+      setProfileError(null);
+      Alert.alert("Profil enregistré", "Vos informations ont été mises à jour.");
+    } catch (error) {
+      Alert.alert(
+        "Enregistrement impossible",
+        error instanceof Error ? error.message : "Impossible d'enregistrer le profil.",
+      );
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const openContactEditor = (contact?: TrustedContact) => {
+    setEditingContact(contact ?? null);
+    setContactName(contact?.name ?? "");
+    setContactPhone(contact?.phone ?? "");
+    setIsContactModalVisible(true);
+  };
+
+  const saveContact = async () => {
+    const database = databaseRef.current;
+    const name = contactName.trim();
+    const phone = contactPhone.trim();
+    if (!database) {
+      Alert.alert(
+        "Stockage hors ligne indisponible",
+        databaseError ?? "Le stockage local n'est pas prêt.",
+      );
+      return;
+    }
+    if (!name || !/^\+?[0-9\s()-]{7,20}$/.test(phone)) {
+      Alert.alert(
+        "Coordonnées invalides",
+        "Saisissez un nom et un numéro de téléphone valide.",
+      );
+      return;
+    }
+    if (!editingContact && contacts.length >= 3) {
+      Alert.alert(
+        "Limite atteinte",
+        "Vous pouvez enregistrer jusqu'à 3 contacts de confiance.",
+      );
+      return;
+    }
+    setIsSavingContact(true);
+    try {
+      const saved = editingContact
+        ? {
+            ...editingContact,
+            name,
+            phone,
+          }
+        : {
+            id: `${Date.now()}`,
+            name,
+            phone,
+            position: contacts.length + 1,
+          };
+      await database.saveContact(saved);
+      setContacts((current) =>
+        editingContact
+          ? current.map((contact) =>
+              contact.id === saved.id ? saved : contact,
+            )
+          : [...current, saved],
+      );
+      setIsContactModalVisible(false);
+    } catch (error) {
+      Alert.alert(
+        "Enregistrement impossible",
+        error instanceof Error
+          ? error.message
+          : "Impossible d'enregistrer le contact hors ligne.",
+      );
+    } finally {
+      setIsSavingContact(false);
+    }
+  };
+
+  const deleteContact = async () => {
+    const database = databaseRef.current;
+    if (!database || !editingContact) return;
+    try {
+      const remaining = contacts
+        .filter((contact) => contact.id !== editingContact.id)
+        .map((contact, index) => ({ ...contact, position: index + 1 }));
+      await database.deleteContact(editingContact.id, remaining);
+      setContacts(remaining);
+      setIsContactModalVisible(false);
+    } catch (error) {
+      Alert.alert(
+        "Suppression impossible",
+        error instanceof Error
+          ? error.message
+          : "Impossible de supprimer le contact.",
+      );
+    }
+  };
+
+  const callNumber = async (number: string) => {
+    const phoneUrl = `tel:${number}`;
+    try {
+      const canOpen = await Linking.canOpenURL(phoneUrl);
+      if (!canOpen) {
+        Alert.alert(
+          "Appel indisponible",
+          "Le téléphone ne peut pas ouvrir le composeur d'appel.",
+        );
+        return;
+      }
+      await Linking.openURL(phoneUrl);
+    } catch {
+      Alert.alert(
+        "Appel indisponible",
+        "Impossible d'ouvrir le composeur téléphonique.",
+      );
+    }
+  };
+
+  const showAddContact = () => {
+    Alert.alert(
+      "Ajouter un contact SOS",
+      "L'ajout de contacts sera bientôt disponible.",
+    );
+  };
+
+  const showActivity = (label: string) => {
+    Alert.alert(label, "Cette activité sera bientôt disponible.");
+  };
+
+  const showLogoutConfirmation = () => {
+    Alert.alert("Déconnexion", "Voulez-vous fermer votre session ?", [
+      { text: "Annuler", style: "cancel" },
+      {
+        text: "Déconnexion",
+        style: "destructive",
+        onPress: () => {
+          void signOut().catch((error: unknown) => {
+            Alert.alert(
+              "Déconnexion impossible",
+              error instanceof Error
+                ? error.message
+                : "Impossible de fermer la session.",
+            );
+          });
+        },
+      },
+    ]);
+  };
+
+  const updatePreferences = async (next: AppPreferences) => {
+    const database = databaseRef.current;
+    if (!database) {
+      Alert.alert(
+        "Paramètres indisponibles",
+        databaseError ?? "Le stockage local n'est pas prêt.",
+      );
+      return;
+    }
+    try {
+      await database.setPreferences(next);
+      Appearance.setColorScheme(next.theme);
+      setPreferences(next);
+      setSosNotificationsEnabled(next.sosNotificationsEnabled);
+      setDefaultRadius(`${next.defaultRadiusKm} km`);
+    } catch (error) {
+      Alert.alert(
+        "Enregistrement impossible",
+        error instanceof Error
+          ? error.message
+          : "Impossible d'enregistrer vos préférences.",
+      );
+    }
+  };
+
+  const requestPhoneOtp = async () => {
+    const phoneNumber = draftPhoneNumber.trim().replace(/[\s()-]/g, "");
+    if (!/^\+[1-9]\d{7,14}$/.test(phoneNumber)) {
+      Alert.alert(
+        "Numéro invalide",
+        "Saisissez le numéro au format international, par exemple +221770000000.",
+      );
+      return;
+    }
+    if (!API_BASE_URL) {
+      Alert.alert("Service indisponible", "L'adresse API n'est pas configurée.");
+      return;
+    }
+    setIsUpdatingPhone(true);
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/api/v1/auth/change-phone/request-otp`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone_number: phoneNumber }),
+        },
+      );
+      if (!response.ok) {
+        const payload = await response.json();
+        const message = isRecord(payload) && typeof payload.error === "string"
+          ? payload.error
+          : `Envoi du code refusé (HTTP ${response.status}).`;
+        throw new Error(message);
+      }
+      setDraftPhoneNumber(phoneNumber);
+      setPhoneOtp("");
+      setPhoneOtpRequested(true);
+      Alert.alert(
+        "Code envoyé",
+        "Saisissez le code reçu sur ce numéro pour confirmer le changement.",
+      );
+    } catch (error) {
+      Alert.alert(
+        "Envoi impossible",
+        error instanceof Error ? error.message : "Impossible d'envoyer le code SMS.",
+      );
+    } finally {
+      setIsUpdatingPhone(false);
+    }
+  };
+
+  const verifyPhoneOtp = async () => {
+    if (!/^\d{6}$/.test(phoneOtp)) {
+      Alert.alert("Code invalide", "Saisissez les six chiffres reçus par SMS.");
+      return;
+    }
+    if (!API_BASE_URL) {
+      Alert.alert("Service indisponible", "L'adresse API n'est pas configurée.");
+      return;
+    }
+    setIsUpdatingPhone(true);
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/api/v1/auth/change-phone/verify-otp`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phone_number: draftPhoneNumber,
+            code: phoneOtp,
+          }),
+        },
+      );
+      const payload: unknown = await response.json();
+      if (
+        !response.ok ||
+        !isRecord(payload) ||
+        typeof payload.phone_number !== "string"
+      ) {
+        const message =
+          isRecord(payload) && typeof payload.error === "string"
+            ? payload.error
+            : `Vérification refusée (HTTP ${response.status}).`;
+        throw new Error(message);
+      }
+      setProfile((current) =>
+        current ? { ...current, phoneNumber: payload.phone_number as string } : current,
+      );
+      setPhoneOtpRequested(false);
+      setPhoneOtp("");
+      setIsPhoneModalVisible(false);
+      Alert.alert("Téléphone mis à jour", "Votre nouveau numéro a été vérifié.");
+    } catch (error) {
+      Alert.alert(
+        "Vérification impossible",
+        error instanceof Error ? error.message : "Impossible de vérifier le code.",
+      );
+    } finally {
+      setIsUpdatingPhone(false);
+    }
+  };
+
+  const updateRadius = () => {
+    const nextRadius =
+      preferences.defaultRadiusKm === 3
+        ? 10
+        : preferences.defaultRadiusKm === 10
+          ? 30
+          : 3;
+    void updatePreferences({ ...preferences, defaultRadiusKm: nextRadius });
+  };
+
+  return (
+    <View style={styles.screen}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.profileHeader}>
+          <View style={styles.avatarWrapper}>
+            <View style={styles.avatar}>
+              <User color="#2563eb" size={34} />
+            </View>
+            {profile?.isVerified && (
+              <View style={styles.verifiedBadge}>
+                <CheckCircle2 color="#ffffff" size={15} />
+              </View>
+            )}
+          </View>
+          <View style={styles.profileInfo}>
+            <Text style={styles.name}>
+              {profile?.name || (profileError ? "Profil indisponible" : "Chargement…")}
+            </Text>
+            <View style={styles.locationLine}>
+              <MapPin color="#64748b" size={14} />
+              <Text style={styles.locationText}>
+                {profile?.neighborhood || "Quartier non renseigné"}
+              </Text>
+            </View>
+            {profile && (
+              <View
+                style={[
+                  styles.verifiedLabel,
+                  profile.role === "relay" && styles.relayRoleBadge,
+                ]}
+              >
+                {profile.isVerified && (
+                  <CheckCircle2 color="#15803d" size={13} />
+                )}
+                <Text style={styles.verifiedText}>
+                  {profile.role === "relay" ? "Voisin Relais" : "Habitant"}
+                </Text>
+              </View>
+            )}
+            {profile?.badge && (
+              <Text style={styles.proBadge}>{profile.badge}</Text>
+            )}
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setDraftName(profile?.name ?? "");
+                setDraftNeighborhood(profile?.neighborhood ?? "");
+                setIsEditingProfile(true);
+              }}
+              style={styles.editProfileButton}
+            >
+              <Edit3 color="#2563eb" size={14} />
+              <Text style={styles.editProfileText}>Modifier le profil</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setDraftPhoneNumber(profile?.phoneNumber ?? "");
+                setPhoneOtpRequested(false);
+                setPhoneOtp("");
+                setIsPhoneModalVisible(true);
+              }}
+              style={styles.editProfileButton}
+            >
+              <PhoneCall color="#2563eb" size={14} />
+              <Text style={styles.editProfileText}>
+                {profile?.phoneNumber || "Ajouter un téléphone"}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+        {profileError && (
+          <Text accessibilityRole="alert" style={styles.errorText}>
+            {profileError}
+          </Text>
+        )}
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => navigation.navigate("Checkout")}
+          style={styles.paymentCard}
+        >
+          <CreditCard color="#ffffff" size={20} />
+          <View style={styles.paymentCopy}>
+            <Text style={styles.paymentTitle}>Développez votre commerce</Text>
+            <Text style={styles.paymentDescription}>
+              Alliance Pro ou épingle sponsorisée · paiement sécurisé
+            </Text>
+          </View>
+          <ChevronRight color="#ffffff" size={19} />
+        </Pressable>
+
+        <View style={styles.countryCard}>
+          <View style={styles.countryHeading}>
+            <Globe color="#2563eb" size={19} />
+            <Text style={styles.cardHeading}>Pays actif</Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: countryMenuOpen }}
+            disabled={!databaseReady}
+            onPress={() => setCountryMenuOpen(!countryMenuOpen)}
+            style={styles.countrySelector}
+          >
+            <View style={styles.countryFlag}>
+              <Text style={styles.countryCode}>{selectedCountry.code}</Text>
+            </View>
+            <Text style={styles.countryName}>{selectedCountry.name}</Text>
+            <ChevronRight
+              color="#64748b"
+              size={19}
+              style={countryMenuOpen ? styles.chevronOpen : undefined}
+            />
+          </Pressable>
+          {countryMenuOpen && (
+            <View style={styles.countryOptions}>
+              {COUNTRIES.map((country) => (
+                <Pressable
+                  accessibilityRole="button"
+                  key={country.code}
+                  onPress={() => void selectCountry(country)}
+                  style={styles.countryOption}
+                >
+                  <View style={styles.countryFlagSmall}>
+                    <Text style={styles.countryCodeSmall}>{country.code}</Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.countryOptionText,
+                      country.code === selectedCountry.code &&
+                        styles.countryOptionTextSelected,
+                    ]}
+                  >
+                    {country.name}
+                  </Text>
+                  {country.code === selectedCountry.code && (
+                    <CheckCircle2 color="#16a34a" size={17} />
+                  )}
+                </Pressable>
+              ))}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.reputationCard}>
+          <View style={styles.reputationTop}>
+            <View style={styles.reputationIcon}>
+              <Shield color="#2563eb" size={22} />
+            </View>
+            <View style={styles.reputationCopy}>
+              <Text style={styles.cardHeading}>
+                Score de Réputation Communautaire
+              </Text>
+              <Text style={styles.trustLabel}>Indice de confiance</Text>
+            </View>
+          </View>
+          <View style={styles.ratingRow}>
+            <Text style={styles.rating}>
+              {profile?.reputationScore === null ||
+              profile?.reputationScore === undefined
+                ? "—"
+                : profile.reputationScore.toFixed(1)}
+            </Text>
+            <Text style={styles.ratingMax}>/ 5</Text>
+            <Star color="#f59e0b" fill="#f59e0b" size={19} />
+            <View style={styles.reliableBadge}>
+              <Text style={styles.reliableText}>
+                {profile?.isVerified ? "Voisin vérifié" : "Réputation"}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            Numéros d'Urgence Officiels du Pays
+          </Text>
+          <Text style={styles.countryContext}>
+            Numéros pour {selectedCountry.name}
+          </Text>
+          {EMERGENCY_SERVICES.map((service) => {
+            const ServiceIcon = service.icon;
+            const number = selectedCountry.emergencyNumbers[service.id];
+            return (
+              <View key={service.id} style={styles.emergencyCard}>
+                <View style={styles.emergencyIcon}>
+                  <ServiceIcon color="#dc2626" size={20} />
+                </View>
+                <View style={styles.emergencyCopy}>
+                  <Text style={styles.emergencyName}>{service.name}</Text>
+                  <Text style={styles.emergencyNumber}>{number}</Text>
+                </View>
+                <Pressable
+                  accessibilityLabel={`Appeler ${service.name}, ${number}`}
+                  accessibilityRole="button"
+                  onPress={() => void callNumber(number)}
+                  style={styles.callButton}
+                >
+                  <PhoneCall color="#ffffff" size={14} />
+                  <Text style={styles.callButtonText}>Appeler</Text>
+                </Pressable>
+              </View>
+            );
+          })}
+          <Text style={styles.disclaimer}>
+            Vérifiez la disponibilité des numéros auprès des autorités locales.
+          </Text>
+        </View>
+
+        <View style={styles.section}>
+          <View style={styles.sectionHeadingRow}>
+            <Text style={styles.sectionTitle}>Mes Contacts SOS Personnels</Text>
+            <Text style={styles.priorityCaption}>Prioritaires</Text>
+          </View>
+          <Text style={styles.sectionDescription}>
+            Ces proches reçoivent un signalement lorsque vous déclenchez SOS.
+          </Text>
+          {contacts.length === 0 && (
+            <Text style={styles.emptyContacts}>
+              Aucun contact de confiance enregistré.
+            </Text>
+          )}
+          {contacts.map((contact, index) => (
+            <Pressable
+              accessibilityLabel={`Modifier le contact ${contact.name}`}
+              accessibilityRole="button"
+              key={contact.id}
+              onPress={() => openContactEditor(contact)}
+              style={styles.contactCard}
+            >
+              <View
+                style={[
+                  styles.contactAvatar,
+                  index === 0 && styles.contactAvatarPrimary,
+                ]}
+              >
+                <Text style={styles.contactInitials}>
+                  {contact.name
+                    .split(/\s+/)
+                    .slice(0, 2)
+                    .map((part) => part[0]?.toUpperCase() ?? "")
+                    .join("")}
+                </Text>
+              </View>
+              <View style={styles.contactCopy}>
+                <Text style={styles.contactName}>{contact.name}</Text>
+                <Text style={styles.contactRelationship}>
+                  {index + 1} · {contact.phone}
+                </Text>
+              </View>
+              <Edit3 color="#64748b" size={17} />
+            </Pressable>
+          ))}
+          {contacts.length < 3 && (
+            <Pressable
+              accessibilityRole="button"
+              disabled={!databaseReady}
+              onPress={() => openContactEditor()}
+              style={styles.addContactButton}
+            >
+              <Text style={styles.addContactText}>
+                + Ajouter un contact de confiance ({contacts.length}/3)
+              </Text>
+            </Pressable>
+          )}
+          {databaseError && (
+            <Text accessibilityRole="alert" style={styles.errorText}>
+              Les contacts hors ligne sont indisponibles : {databaseError}
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Mes Activités</Text>
+          <View style={styles.settingsCard}>
+            {ACTIVITIES.map((activity, index) => {
+              const ActivityIcon = activity.icon;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  key={activity.id}
+                  onPress={() => showActivity(activity.label)}
+                  style={[
+                    styles.menuRow,
+                    index < ACTIVITIES.length - 1 && styles.menuRowBorder,
+                  ]}
+                >
+                  <ActivityIcon color="#2563eb" size={19} />
+                  <Text style={styles.menuLabel}>{activity.label}</Text>
+                  <ChevronRight color="#94a3b8" size={18} />
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Confidentialité & Paramètres</Text>
+          <View style={styles.settingsCard}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={updateRadius}
+              style={[styles.menuRow, styles.menuRowBorder]}
+            >
+              <MapPin color="#2563eb" size={19} />
+              <Text style={styles.menuLabel}>Rayon GPS par défaut</Text>
+              <Text style={styles.settingValue}>{defaultRadius}</Text>
+              <ChevronRight color="#94a3b8" size={18} />
+            </Pressable>
+            <View style={[styles.menuRow, styles.menuRowBorder]}>
+              <Bell color="#2563eb" size={19} />
+              <View style={styles.notificationCopy}>
+                <Text style={styles.menuLabel}>Notifications SOS</Text>
+                <Text style={styles.settingDescription}>
+                  Alertes de sécurité prioritaires
+                </Text>
+              </View>
+              <Switch
+                accessibilityLabel="Gestion des notifications SOS"
+                onValueChange={(enabled) =>
+                  void updatePreferences({
+                    ...preferences,
+                    sosNotificationsEnabled: enabled,
+                  })
+                }
+                trackColor={{ false: "#cbd5e1", true: "#86efac" }}
+                thumbColor={sosNotificationsEnabled ? "#16a34a" : "#f8fafc"}
+                value={sosNotificationsEnabled}
+              />
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() =>
+                void updatePreferences({
+                  ...preferences,
+                  theme: preferences.theme === "light" ? "dark" : "light",
+                })
+              }
+              style={[styles.menuRow, styles.menuRowBorder]}
+            >
+              <Settings color="#2563eb" size={19} />
+              <Text style={styles.menuLabel}>Thème de l'application</Text>
+              <Text style={styles.settingValue}>
+                {preferences.theme === "light" ? "Clair" : "Sombre"}
+              </Text>
+              <ChevronRight color="#94a3b8" size={18} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() =>
+                void updatePreferences({
+                  ...preferences,
+                  language: preferences.language === "fr" ? "en" : "fr",
+                })
+              }
+              style={[styles.menuRow, styles.menuRowBorder]}
+            >
+              <Globe color="#2563eb" size={19} />
+              <Text style={styles.menuLabel}>Langue</Text>
+              <Text style={styles.settingValue}>
+                {preferences.language === "fr" ? "Français" : "English"}
+              </Text>
+              <ChevronRight color="#94a3b8" size={18} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() =>
+                Alert.alert(
+                  "Confidentialité",
+                  "Les paramètres de confidentialité seront bientôt disponibles.",
+                )
+              }
+              style={styles.menuRow}
+            >
+              <Lock color="#2563eb" size={19} />
+              <Text style={styles.menuLabel}>Confidentialité du compte</Text>
+              <ChevronRight color="#94a3b8" size={18} />
+            </Pressable>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={showLogoutConfirmation}
+            style={styles.logoutButton}
+          >
+            <LogOut color="#dc2626" size={19} />
+            <Text style={styles.logoutText}>Déconnexion</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.footer}>
+          <Settings color="#94a3b8" size={14} />
+          <Text style={styles.footerText}>QuartierPlus · Profil communautaire</Text>
+        </View>
+      </ScrollView>
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setIsEditingProfile(false)}
+        transparent
+        visible={isEditingProfile}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Modifier mon profil</Text>
+            <Text style={styles.inputLabel}>Nom</Text>
+            <VoiceTextInput
+              autoCapitalize="words"
+              onChangeText={setDraftName}
+              placeholder="Votre nom"
+              style={styles.modalInput}
+              value={draftName}
+            />
+            <Text style={styles.inputLabel}>Quartier</Text>
+            <VoiceTextInput
+              autoCapitalize="words"
+              onChangeText={setDraftNeighborhood}
+              placeholder="Votre quartier"
+              style={styles.modalInput}
+              value={draftNeighborhood}
+            />
+            <Text style={styles.countryContext}>
+              Pays actif : {selectedCountry.name}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              disabled={isSavingProfile}
+              onPress={() => void saveProfile()}
+              style={styles.primaryAction}
+            >
+              {isSavingProfile ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <Text style={styles.primaryActionText}>Enregistrer le profil</Text>
+              )}
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setIsEditingProfile(false)}
+              style={styles.secondaryAction}
+            >
+              <Text style={styles.secondaryActionText}>Annuler</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setIsPhoneModalVisible(false)}
+        transparent
+        visible={isPhoneModalVisible}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Modifier mon téléphone</Text>
+            <Text style={styles.countryContext}>
+              Le numéro sera changé uniquement après vérification par SMS.
+            </Text>
+            <Text style={styles.inputLabel}>Numéro international</Text>
+            <TextInput
+              autoComplete="tel"
+              keyboardType="phone-pad"
+              onChangeText={setDraftPhoneNumber}
+              placeholder="+221770000000"
+              style={styles.modalInput}
+              value={draftPhoneNumber}
+            />
+            {phoneOtpRequested && (
+              <>
+                <Text style={styles.inputLabel}>Code de vérification</Text>
+                <TextInput
+                  autoComplete="one-time-code"
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  onChangeText={(value) => setPhoneOtp(value.replace(/\D/g, ""))}
+                  placeholder="123456"
+                  style={styles.modalInput}
+                  value={phoneOtp}
+                />
+              </>
+            )}
+            <Pressable
+              accessibilityRole="button"
+              disabled={isUpdatingPhone}
+              onPress={() =>
+                void (phoneOtpRequested ? verifyPhoneOtp() : requestPhoneOtp())
+              }
+              style={styles.primaryAction}
+            >
+              {isUpdatingPhone ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <Text style={styles.primaryActionText}>
+                  {phoneOtpRequested ? "Vérifier le code" : "Recevoir un code SMS"}
+                </Text>
+              )}
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setIsPhoneModalVisible(false)}
+              style={styles.secondaryAction}
+            >
+              <Text style={styles.secondaryActionText}>Annuler</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setIsContactModalVisible(false)}
+        transparent
+        visible={isContactModalVisible}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>
+              {editingContact ? "Modifier le contact SOS" : "Ajouter un contact SOS"}
+            </Text>
+            <Text style={styles.inputLabel}>Nom</Text>
+            <VoiceTextInput
+              autoCapitalize="words"
+              onChangeText={setContactName}
+              placeholder="Nom du contact"
+              style={styles.modalInput}
+              value={contactName}
+            />
+            <Text style={styles.inputLabel}>Téléphone</Text>
+            <TextInput
+              keyboardType="phone-pad"
+              onChangeText={setContactPhone}
+              placeholder="+221 77 000 00 00"
+              style={styles.modalInput}
+              value={contactPhone}
+            />
+            <Pressable
+              accessibilityRole="button"
+              disabled={isSavingContact}
+              onPress={() => void saveContact()}
+              style={styles.primaryAction}
+            >
+              {isSavingContact ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <Text style={styles.primaryActionText}>Enregistrer hors ligne</Text>
+              )}
+            </Pressable>
+            {editingContact && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void deleteContact()}
+                style={styles.deleteAction}
+              >
+                <Trash2 color="#dc2626" size={16} />
+                <Text style={styles.deleteActionText}>Supprimer le contact</Text>
+              </Pressable>
+            )}
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setIsContactModalVisible(false)}
+              style={styles.secondaryAction}
+            >
+              <Text style={styles.secondaryActionText}>Annuler</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: {
+    backgroundColor: "#f5f7fa",
+    flex: 1,
+  },
+  content: {
+    paddingBottom: 38,
+    paddingHorizontal: 20,
+    paddingTop: 55,
+  },
+  profileHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    marginBottom: 17,
+  },
+  avatarWrapper: {
+    marginRight: 14,
+    position: "relative",
+  },
+  avatar: {
+    alignItems: "center",
+    backgroundColor: "#dbeafe",
+    borderColor: "#ffffff",
+    borderRadius: 36,
+    borderWidth: 3,
+    height: 72,
+    justifyContent: "center",
+    width: 72,
+  },
+  verifiedBadge: {
+    alignItems: "center",
+    backgroundColor: "#16a34a",
+    borderColor: "#ffffff",
+    borderRadius: 11,
+    borderWidth: 2,
+    bottom: 0,
+    height: 23,
+    justifyContent: "center",
+    position: "absolute",
+    right: 0,
+    width: 23,
+  },
+  profileInfo: {
+    flex: 1,
+  },
+  name: {
+    color: "#172b4d",
+    fontSize: 21,
+    fontWeight: "700",
+  },
+  locationLine: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 5,
+    marginTop: 5,
+  },
+  locationText: {
+    color: "#64748b",
+    fontSize: 13,
+  },
+  verifiedLabel: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "#dcfce7",
+    borderRadius: 7,
+    flexDirection: "row",
+    gap: 4,
+    marginTop: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
+  verifiedText: {
+    color: "#15803d",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  proBadge: {
+    alignSelf: "flex-start",
+    color: "#92400e",
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 6,
+  },
+  paymentCard: {
+    alignItems: "center",
+    backgroundColor: "#1d4ed8",
+    borderRadius: 13,
+    flexDirection: "row",
+    gap: 11,
+    marginBottom: 17,
+    padding: 14,
+  },
+  paymentCopy: {
+    flex: 1,
+  },
+  paymentTitle: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  paymentDescription: {
+    color: "#dbeafe",
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 3,
+  },
+  relayRoleBadge: {
+    backgroundColor: "#dbeafe",
+  },
+  editProfileButton: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    gap: 5,
+    marginTop: 7,
+    minHeight: 28,
+  },
+  editProfileText: {
+    color: "#2563eb",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  errorText: {
+    color: "#b91c1c",
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 10,
+  },
+  countryCard: {
+    backgroundColor: "#ffffff",
+    borderColor: "#e2e8f0",
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 13,
+    padding: 13,
+  },
+  countryHeading: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 10,
+  },
+  cardHeading: {
+    color: "#172b4d",
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  countrySelector: {
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
+    borderRadius: 10,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 46,
+    paddingHorizontal: 10,
+  },
+  countryFlag: {
+    alignItems: "center",
+    backgroundColor: "#e2e8f0",
+    borderRadius: 7,
+    height: 29,
+    justifyContent: "center",
+    width: 39,
+  },
+  countryCode: {
+    color: "#334155",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  countryName: {
+    color: "#172b4d",
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  chevronOpen: {
+    transform: [{ rotate: "90deg" }],
+  },
+  countryOptions: {
+    borderTopColor: "#e2e8f0",
+    borderTopWidth: 1,
+    marginTop: 9,
+    paddingTop: 4,
+  },
+  countryOption: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 42,
+  },
+  countryFlagSmall: {
+    alignItems: "center",
+    backgroundColor: "#f1f5f9",
+    borderRadius: 5,
+    height: 24,
+    justifyContent: "center",
+    width: 32,
+  },
+  countryCodeSmall: {
+    color: "#475569",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  countryOptionText: {
+    color: "#475569",
+    flex: 1,
+    fontSize: 13,
+  },
+  countryOptionTextSelected: {
+    color: "#15803d",
+    fontWeight: "700",
+  },
+  reputationCard: {
+    backgroundColor: "#ffffff",
+    borderColor: "#dbeafe",
+    borderRadius: 15,
+    borderWidth: 1,
+    marginBottom: 25,
+    padding: 15,
+  },
+  reputationTop: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+  },
+  reputationIcon: {
+    alignItems: "center",
+    backgroundColor: "#eff6ff",
+    borderRadius: 11,
+    height: 42,
+    justifyContent: "center",
+    width: 42,
+  },
+  reputationCopy: {
+    flex: 1,
+  },
+  trustLabel: {
+    color: "#64748b",
+    fontSize: 11,
+    marginTop: 3,
+  },
+  ratingRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 5,
+    marginTop: 14,
+  },
+  rating: {
+    color: "#172b4d",
+    fontSize: 26,
+    fontWeight: "800",
+  },
+  ratingMax: {
+    color: "#64748b",
+    fontSize: 13,
+    marginRight: 1,
+  },
+  reliableBadge: {
+    backgroundColor: "#ecfdf5",
+    borderRadius: 7,
+    marginLeft: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  reliableText: {
+    color: "#15803d",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  section: {
+    marginBottom: 25,
+  },
+  sectionTitle: {
+    color: "#172b4d",
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  countryContext: {
+    color: "#64748b",
+    fontSize: 12,
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  emergencyCard: {
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderRadius: 13,
+    flexDirection: "row",
+    marginBottom: 8,
+    padding: 11,
+  },
+  emergencyIcon: {
+    alignItems: "center",
+    backgroundColor: "#fef2f2",
+    borderRadius: 10,
+    height: 39,
+    justifyContent: "center",
+    marginRight: 10,
+    width: 39,
+  },
+  emergencyCopy: {
+    flex: 1,
+  },
+  emergencyName: {
+    color: "#172b4d",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  emergencyNumber: {
+    color: "#dc2626",
+    fontSize: 16,
+    fontWeight: "800",
+    marginTop: 3,
+  },
+  callButton: {
+    alignItems: "center",
+    backgroundColor: "#dc2626",
+    borderRadius: 8,
+    flexDirection: "row",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  callButtonText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  disclaimer: {
+    color: "#94a3b8",
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  sectionHeadingRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  priorityCaption: {
+    color: "#64748b",
+    fontSize: 10,
+  },
+  sectionDescription: {
+    color: "#64748b",
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 10,
+    marginTop: 5,
+  },
+  contactCard: {
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderRadius: 12,
+    flexDirection: "row",
+    marginBottom: 7,
+    padding: 10,
+  },
+  contactAvatar: {
+    alignItems: "center",
+    backgroundColor: "#64748b",
+    borderRadius: 19,
+    height: 38,
+    justifyContent: "center",
+    marginRight: 10,
+    width: 38,
+  },
+  contactAvatarPrimary: {
+    backgroundColor: "#2563eb",
+  },
+  contactInitials: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  contactCopy: {
+    flex: 1,
+  },
+  contactName: {
+    color: "#172b4d",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  contactRelationship: {
+    color: "#64748b",
+    fontSize: 11,
+    marginTop: 3,
+  },
+  emptyContacts: {
+    backgroundColor: "#ffffff",
+    borderRadius: 10,
+    color: "#64748b",
+    fontSize: 12,
+    marginBottom: 8,
+    padding: 12,
+  },
+  addContactButton: {
+    alignItems: "center",
+    borderColor: "#bfdbfe",
+    borderRadius: 10,
+    borderWidth: 1,
+    marginTop: 3,
+    minHeight: 42,
+    justifyContent: "center",
+  },
+  addContactText: {
+    color: "#2563eb",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  modalBackdrop: {
+    backgroundColor: "rgba(15, 23, 42, 0.55)",
+    flex: 1,
+    justifyContent: "center",
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    padding: 20,
+  },
+  modalTitle: {
+    color: "#172b4d",
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: 15,
+  },
+  inputLabel: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 6,
+  },
+  modalInput: {
+    backgroundColor: "#f8fafc",
+    borderColor: "#cbd5e1",
+    borderRadius: 9,
+    borderWidth: 1,
+    color: "#172b4d",
+    fontSize: 14,
+    marginBottom: 12,
+    minHeight: 45,
+    paddingHorizontal: 12,
+  },
+  primaryAction: {
+    alignItems: "center",
+    backgroundColor: "#2563eb",
+    borderRadius: 9,
+    justifyContent: "center",
+    marginTop: 5,
+    minHeight: 46,
+  },
+  primaryActionText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  secondaryAction: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 12,
+    minHeight: 40,
+  },
+  secondaryActionText: {
+    color: "#64748b",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  deleteAction: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 7,
+    justifyContent: "center",
+    marginTop: 12,
+    minHeight: 40,
+  },
+  deleteActionText: {
+    color: "#dc2626",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  settingsCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 13,
+    marginTop: 11,
+    overflow: "hidden",
+    paddingHorizontal: 12,
+  },
+  menuRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 50,
+    paddingVertical: 8,
+  },
+  menuRowBorder: {
+    borderBottomColor: "#f1f5f9",
+    borderBottomWidth: 1,
+  },
+  menuLabel: {
+    color: "#334155",
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  settingValue: {
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  notificationCopy: {
+    flex: 1,
+  },
+  settingDescription: {
+    color: "#94a3b8",
+    fontSize: 10,
+    marginTop: 2,
+  },
+  logoutButton: {
+    alignItems: "center",
+    backgroundColor: "#fef2f2",
+    borderRadius: 11,
+    flexDirection: "row",
+    gap: 9,
+    justifyContent: "center",
+    marginTop: 13,
+    minHeight: 47,
+  },
+  logoutText: {
+    color: "#dc2626",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  footer: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+    justifyContent: "center",
+    paddingBottom: 8,
+  },
+  footerText: {
+    color: "#94a3b8",
+    fontSize: 10,
+  },
+});
