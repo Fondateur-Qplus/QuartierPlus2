@@ -2,7 +2,7 @@
   "expo": {
     "name": "QuartierPlus",
     "slug": "quartierplus",
-    "owner": "quartierplus-bf",
+    "owner": "quartierplus_bf",
     "extra": {
       "eas": {
         "projectId": "fe1302fc-1f61-4787-96c3-5fbf4948737b"
