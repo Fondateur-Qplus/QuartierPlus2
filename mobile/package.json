@@ -34,6 +34,7 @@
     "expo-speech-recognition": "^57.1.0",
     "expo-sqlite": "~57.0.3",
     "expo-status-bar": "~57.0.1",
+    "expo-updates": "~57.0.24",
     "expo-web-browser": "~57.0.3",
     "livekit-client": "^2.22.3",
     "lucide-react-native": "^1.50.0",

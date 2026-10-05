@@ -70,6 +70,12 @@
     ],
     "android": {
       "package": "com.anonymous.quartierplus"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/fe1302fc-1f61-4787-96c3-5fbf4948737b"
     }
   }
 }
