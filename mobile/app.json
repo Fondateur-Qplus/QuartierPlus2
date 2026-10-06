@@ -10,9 +10,6 @@
     },
     "version": "1.0.0",
     "scheme": "quartierplus",
-    "autolinking": {
-      "nativeModulesDir": "./modules"
-    },
     "ios": {
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
