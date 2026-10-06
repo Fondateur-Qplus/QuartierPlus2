@@ -3,3 +3,7 @@ node_modules/
 .env
 .env.*
 !.env.example
+
+/mobile/android/
+/mobile/ios/
+/mobile/**/.gradle/

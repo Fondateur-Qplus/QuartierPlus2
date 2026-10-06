@@ -1,4 +1,4 @@
-import { requireNativeModule } from "expo-modules-core";
+import { requireNativeModule } from "expo";
 import { startIOSPIP } from "@livekit/react-native-webrtc";
 import { Platform } from "react-native";
 
