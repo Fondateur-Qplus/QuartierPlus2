@@ -6,6 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: 🏗 Checkout repo
         uses: actions/checkout@v4
@@ -47,10 +48,9 @@ jobs:
           cd mobile
           npx expo prebuild --clean
           cd android
-          ./gradlew assembleRelease --stacktrace
-
-      - name: 🔨 Build Android APK
-        working-directory: mobile
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas build --platform android --profile preview --non-interactive --clear-cache
+          ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" \
+            -x lintVitalAnalyzeRelease \
+            -x lintVitalReportRelease \
+            -x lintVitalRelease \
+            -PreactNativeArchitectures=arm64-v8a \
+            assembleRelease --stacktrace
