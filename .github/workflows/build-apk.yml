@@ -30,6 +30,18 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
+      - name: 🔎 Debug Grin PiP Gradle source
+        run: |
+          git log -1 --decorate
+          for root in mobile/modules mobile/node_modules mobile/android; do
+            if [ -d "$root" ]; then
+              while IFS= read -r -d '' file; do
+                printf '\n--- %s ---\n' "$file"
+                cat "$file"
+              done < <(find -L "$root" -type f -name build.gradle -path '*/grin-pip/*' -print0 | sort -z)
+            fi
+          done
+
       - name: Test local Gradle build
         run: |
           cd mobile
