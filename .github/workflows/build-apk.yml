@@ -24,6 +24,19 @@ jobs:
         working-directory: mobile
         run: npm ci
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Test local Gradle build
+        run: |
+          cd mobile
+          npx expo prebuild --clean
+          cd android
+          ./gradlew assembleRelease --stacktrace
+
       - name: 🔨 Build Android APK
         working-directory: mobile
         env:
