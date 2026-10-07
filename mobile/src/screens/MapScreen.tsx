@@ -1,5 +1,10 @@
-import { Audio } from "expo-av";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import {
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+} from "expo-audio";
 import { File, Paths } from "expo-file-system";
 import * as Location from "expo-location";
 import {
@@ -338,6 +343,7 @@ export default function MapScreen() {
     "connecting",
   );
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [sosPhase, setSosPhase] = useState<SosPhase>("closed");
   const [cameraReady, setCameraReady] = useState(false);
   const [emergencyImageUri, setEmergencyImageUri] = useState<string | null>(null);
@@ -350,7 +356,7 @@ export default function MapScreen() {
   const mapRef = useRef<MapView>(null);
   const socketRef = useRef<Socket | null>(null);
   const cameraRef = useRef<CameraView>(null);
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recordingRef = useRef<typeof audioRecorder | null>(null);
   const audioStartPromiseRef = useRef<Promise<void> | null>(null);
   const locationPromiseRef = useRef<Promise<Location.LocationObject> | null>(null);
   const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -720,7 +726,7 @@ export default function MapScreen() {
       if (countdownTimerRef.current) clearTimeout(countdownTimerRef.current);
       abortControllerRef.current?.abort();
       const recording = recordingRef.current;
-      if (recording) void recording.stopAndUnloadAsync().catch(() => undefined);
+      if (recording?.isRecording) void recording.stop().catch(() => undefined);
     },
     [],
   );
@@ -752,7 +758,7 @@ export default function MapScreen() {
         return;
       }
 
-      const audioPermission = await Audio.requestPermissionsAsync();
+      const audioPermission = await requestRecordingPermissionsAsync();
       if (!audioPermission.granted) {
         setCaptureError(
           "L'accès au microphone est requis pour joindre les 3 secondes d'audio ambiant.",
@@ -768,31 +774,29 @@ export default function MapScreen() {
   };
 
   const recordAmbientAudio = async () => {
-    const recording = new Audio.Recording();
+    const recording = audioRecorder;
     const captureController = abortControllerRef.current;
     recordingRef.current = recording;
     try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
       });
-      await recording.prepareToRecordAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY,
-      );
+      await recording.prepareToRecordAsync();
       if (captureController?.signal.aborted) {
-        await recording.stopAndUnloadAsync().catch(() => undefined);
         if (recordingRef.current === recording) recordingRef.current = null;
         return;
       }
-      await recording.startAsync();
+      recording.record();
       if (captureController?.signal.aborted) {
-        await recording.stopAndUnloadAsync().catch(() => undefined);
+        await recording.stop();
         if (recordingRef.current === recording) recordingRef.current = null;
         return;
       }
       setIsRecordingAudio(true);
       setIsCaptureAudioReady(true);
     } catch (error) {
+      if (recordingRef.current === recording) recordingRef.current = null;
       setIsRecordingAudio(false);
       throw error;
     }
@@ -843,13 +847,11 @@ export default function MapScreen() {
     recordingRef.current = null;
     setIsRecordingAudio(false);
     if (!recording) return null;
-    const status = await recording.getStatusAsync();
-    if (status.isRecording) await recording.stopAndUnloadAsync();
-    else await recording.stopAndUnloadAsync().catch(() => undefined);
-    const uri = recording.getURI();
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: false,
-      playsInSilentModeIOS: true,
+    if (recording.isRecording) await recording.stop();
+    const uri = recording.uri;
+    await setAudioModeAsync({
+      allowsRecording: false,
+      playsInSilentMode: true,
     });
     return uri;
   };
