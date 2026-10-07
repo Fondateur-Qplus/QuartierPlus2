@@ -77,6 +77,7 @@
     ],
     "android": {
       "package": "com.anonymous.quartierplus",
+      "versionCode": 1,
       "permissions": [
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.CAMERA",
