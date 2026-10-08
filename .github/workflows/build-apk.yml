@@ -110,7 +110,7 @@ jobs:
             -x lintVitalAnalyzeRelease \
             -x lintVitalReportRelease \
             -x lintVitalRelease \
-            -PreactNativeArchitectures=arm64-v8a \
+            -PreactNativeArchitectures=armeabi-v7a,arm64-v8a \
             :app:assembleRelease
 
       - name: Upload release APK
