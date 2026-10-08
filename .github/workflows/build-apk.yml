@@ -2,11 +2,23 @@ name: Build Android Preview APK
 
 on:
   workflow_dispatch:
+    inputs:
+      etape:
+        description: Étape à exécuter
+        type: choice
+        options:
+          - compilation
+          - apk
+        default: compilation
+        required: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    concurrency:
+      group: build-android-preview-apk-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: 🏗 Checkout repo
         uses: actions/checkout@v4
@@ -18,18 +30,18 @@ jobs:
           cache: npm
           cache-dependency-path: mobile/package-lock.json
 
-      - name: 🚀 Install EAS CLI
-        run: npm install -g eas-cli
-
-      - name: 📦 Install dependencies
-        working-directory: mobile
-        run: npm ci
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
+
+      - name: 📦 Install dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: 🔎 Debug Grin PiP Gradle source
         run: |
@@ -43,14 +55,34 @@ jobs:
             fi
           done
 
-      - name: Test local Gradle build
+      - name: Expo prebuild
         run: |
           cd mobile
           npx expo prebuild --clean
-          cd android
+
+      - name: Gradle compilation validation
+        if: inputs.etape == 'compilation'
+        working-directory: mobile/android
+        run: |
+          ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" help
+          ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" \
+            :app:assembleRelease --dry-run
+
+      - name: Build release APK
+        if: inputs.etape == 'apk'
+        working-directory: mobile/android
+        run: |
           ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" \
             -x lintVitalAnalyzeRelease \
             -x lintVitalReportRelease \
             -x lintVitalRelease \
             -PreactNativeArchitectures=arm64-v8a \
-            assembleRelease --stacktrace
+            :app:assembleRelease
+
+      - name: Upload release APK
+        if: inputs.etape == 'apk'
+        uses: actions/upload-artifact@v4
+        with:
+          name: quartierplus-release-apk
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 7
