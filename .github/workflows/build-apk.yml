@@ -65,6 +65,30 @@ jobs:
           fi
           printf '%s' "$GSJ" > mobile/google-services.json
 
+      - name: Validate Google services package
+        run: |
+          grep -o '"package_name"[[:space:]]*:[[:space:]]*"[^"]*"' mobile/google-services.json || true
+          node <<'NODE'
+          const fs = require('fs');
+
+          const expectedPackage = 'com.quartierplus_bf.quartierplus';
+          const googleServices = JSON.parse(fs.readFileSync('mobile/google-services.json', 'utf8'));
+          const appConfig = JSON.parse(fs.readFileSync('mobile/app.json', 'utf8'));
+          const packageNames = (googleServices.client ?? [])
+            .map((client) => client.client_info?.android_client_info?.package_name)
+            .filter(Boolean);
+
+          if (!packageNames.includes(expectedPackage)) {
+            console.error(`::error::mobile/google-services.json does not contain package_name "${expectedPackage}".`);
+            process.exit(1);
+          }
+
+          if (appConfig.expo?.android?.package !== expectedPackage) {
+            console.error(`::error::expo.android.package in mobile/app.json must be "${expectedPackage}".`);
+            process.exit(1);
+          }
+          NODE
+
       - name: Expo prebuild
         run: |
           cd mobile
