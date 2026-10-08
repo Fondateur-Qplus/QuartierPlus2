@@ -76,6 +76,7 @@
       ]
     ],
     "android": {
+      "googleServicesFile": "./google-services.json",
       "package": "com.anonymous.quartierplus",
       "versionCode": 1,
       "permissions": [

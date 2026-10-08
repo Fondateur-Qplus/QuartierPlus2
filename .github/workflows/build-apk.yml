@@ -55,6 +55,16 @@ jobs:
             fi
           done
 
+      - name: Configure Google services
+        env:
+          GSJ: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GSJ" ]; then
+            echo "::error::Required repository secret GOOGLE_SERVICES_JSON is missing or empty."
+            exit 1
+          fi
+          printf '%s' "$GSJ" > mobile/google-services.json
+
       - name: Expo prebuild
         run: |
           cd mobile
