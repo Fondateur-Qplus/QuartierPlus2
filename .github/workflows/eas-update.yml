@@ -2,6 +2,12 @@ name: EAS Update (OTA)
 
 on:
   workflow_dispatch:
+    inputs:
+      message:
+        description: Message pour la mise à jour EAS
+        type: string
+        required: false
+        default: ''
 
 jobs:
   update:
@@ -26,7 +32,7 @@ jobs:
       - name: 📲 Publish EAS Update
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          UPDATE_MESSAGE: ${{ github.event.head_commit.message }}
+          UPDATE_MESSAGE: ${{ inputs.message || format('Manual EAS update from {0}', github.sha) }}
         run: |
           cd mobile
           eas update --branch preview --message "$UPDATE_MESSAGE" --non-interactive
