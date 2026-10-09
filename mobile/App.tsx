@@ -4,7 +4,6 @@ import {
 } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { registerGlobals } from "@livekit/react-native";
 import {
   Home,
   MapPin,
@@ -46,8 +45,6 @@ import WalkieTalkieScreen from "./src/screens/WalkieTalkieScreen";
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
-
-registerGlobals();
 
 function MainTabs() {
   return (

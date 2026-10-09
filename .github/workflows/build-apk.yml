@@ -58,38 +58,77 @@ jobs:
       - name: Configure Google services
         env:
           GSJ: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
         run: |
           if [ -z "$GSJ" ]; then
-            echo "::error::Required repository secret GOOGLE_SERVICES_JSON is missing or empty."
+            echo "::error::Le secret GOOGLE_SERVICES_JSON est absent ou vide."
             exit 1
           fi
           printf '%s' "$GSJ" > mobile/google-services.json
 
-      - name: Validate Google services package
+      - name: Validate Firebase and app configuration
+        env:
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
+          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
         run: |
-          grep -o '"package_name"[[:space:]]*:[[:space:]]*"[^"]*"' mobile/google-services.json || true
-          node <<'NODE'
-          const fs = require('fs');
+          if ! node -e "JSON.parse(require('fs').readFileSync('mobile/google-services.json', 'utf8'))" >/dev/null 2>&1; then
+            echo "::error::Le fichier google-services.json est absent ou contient un JSON invalide."
+            exit 1
+          fi
 
-          const expectedPackage = 'com.quartierplus_bf.quartierplus';
-          const googleServices = JSON.parse(fs.readFileSync('mobile/google-services.json', 'utf8'));
-          const appConfig = JSON.parse(fs.readFileSync('mobile/app.json', 'utf8'));
-          const packageNames = (googleServices.client ?? [])
-            .map((client) => client.client_info?.android_client_info?.package_name)
-            .filter(Boolean);
+          EXPECTED_PACKAGE="$(node -p "require('./mobile/app.json').expo.android.package")"
+          FIREBASE_PROJECT_ID="$(node -p "require('./mobile/google-services.json').project_info.project_id")"
+          FIREBASE_PACKAGE_NAMES="$(node -p "Array.from(new Set((require('./mobile/google-services.json').client || []).map((client) => client.client_info?.android_client_info?.package_name).filter(Boolean))).join(',')")"
 
-          if (!packageNames.includes(expectedPackage)) {
-            console.error(`::error::mobile/google-services.json does not contain package_name "${expectedPackage}".`);
-            process.exit(1);
-          }
+          if [ -z "$FIREBASE_PROJECT_ID" ] || [ "$FIREBASE_PROJECT_ID" = "undefined" ]; then
+            echo "::error::project_info.project_id est absent de google-services.json."
+            exit 1
+          fi
 
-          if (appConfig.expo?.android?.package !== expectedPackage) {
-            console.error(`::error::expo.android.package in mobile/app.json must be "${expectedPackage}".`);
-            process.exit(1);
-          }
-          NODE
+          printf 'Firebase project_id: %s\n' "$FIREBASE_PROJECT_ID"
+          printf 'Firebase package_name: %s\n' "$FIREBASE_PACKAGE_NAMES"
+
+          if [ -z "$EXPECTED_PACKAGE" ]; then
+            echo "::error::expo.android.package est absent de mobile/app.json."
+            exit 1
+          fi
+          if [ "$FIREBASE_PACKAGE_NAMES" != "$EXPECTED_PACKAGE" ]; then
+            echo "::error::Le package_name de google-services.json ne correspond pas à expo.android.package dans mobile/app.json."
+            exit 1
+          fi
+          if printf '%s' "$EXPO_PUBLIC_FIREBASE_PROJECT_ID" | grep -q '[^[:space:]]' && [ "$FIREBASE_PROJECT_ID" != "$EXPO_PUBLIC_FIREBASE_PROJECT_ID" ]; then
+            echo "::error::google-services.json et EXPO_PUBLIC_FIREBASE_* ne viennent pas du même projet Firebase."
+            exit 1
+          fi
+
+          MISSING_CONFIG=""
+          if ! printf '%s' "$EXPO_PUBLIC_FIREBASE_PROJECT_ID" | grep -q '[^[:space:]]'; then
+            MISSING_CONFIG="$MISSING_CONFIG EXPO_PUBLIC_FIREBASE_PROJECT_ID"
+          fi
+          if ! printf '%s' "$EXPO_PUBLIC_API_URL" | grep -q '[^[:space:]]'; then
+            MISSING_CONFIG="$MISSING_CONFIG EXPO_PUBLIC_API_URL"
+          fi
+          if ! printf '%s' "$EXPO_PUBLIC_GOOGLE_MAPS_API_KEY" | grep -q '[^[:space:]]'; then
+            MISSING_CONFIG="$MISSING_CONFIG EXPO_PUBLIC_GOOGLE_MAPS_API_KEY"
+          fi
+          if [ -n "$MISSING_CONFIG" ]; then
+            echo "::error::Configuration de build absente ou vide :$MISSING_CONFIG."
+            exit 1
+          fi
 
       - name: Expo prebuild
+        env:
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
+          EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
+          EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL }}
         run: |
           cd mobile
           npx expo prebuild --clean
@@ -97,6 +136,17 @@ jobs:
       - name: Gradle compilation validation
         if: inputs.etape == 'compilation'
         working-directory: mobile/android
+        env:
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
+          EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
+          EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL }}
         run: |
           ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" help
           ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" \
@@ -105,6 +155,17 @@ jobs:
       - name: Build release APK
         if: inputs.etape == 'apk'
         working-directory: mobile/android
+        env:
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
+          EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
+          EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL }}
         run: |
           ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" \
             -x lintVitalAnalyzeRelease \

@@ -1,6 +1,7 @@
 {
   "name": "quartierplus-mobile",
   "version": "1.0.0",
+  "main": "index.js",
   "private": true,
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^15.0.2",
@@ -8,7 +9,10 @@
     "@livekit/react-native": "^3.0.0",
     "@livekit/react-native-expo-plugin": "^1.0.3",
     "@livekit/react-native-webrtc": "^144.2.0",
+    "@quartierplus/grin-pip": "file:modules/grin-pip",
     "@react-native-community/netinfo": "12.0.1",
+    "@react-native-firebase/app": "26.4.0",
+    "@react-native-firebase/crashlytics": "26.4.0",
     "@react-native-masked-view/masked-view": "0.3.2",
     "@react-navigation/bottom-tabs": "^7.20.0",
     "@react-navigation/native": "^7.5.0",

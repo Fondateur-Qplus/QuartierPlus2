@@ -35,9 +35,8 @@ const ensureNetworkListener = () => {
   });
 };
 
-ensureNetworkListener();
-
 export const getNetworkStatus = async () => {
+  ensureNetworkListener();
   if (isOnline !== null) return isOnline;
   const state = await NetInfo.fetch();
   isOnline = isStateOnline(state);
