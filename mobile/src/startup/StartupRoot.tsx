@@ -7,6 +7,10 @@ import {
   type PropsWithChildren,
 } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import {
+  setCrashlyticsAvailability,
+  setFirebaseAvailability,
+} from "./technicalStatus";
 
 type StartupState =
   | { status: "loading" }
@@ -23,14 +27,6 @@ type StartupRootProps = {
   crashlyticsStartupPromise: Promise<unknown | null>;
 };
 
-const requiredEnvironment = [
-  ["EXPO_PUBLIC_API_URL", process.env.EXPO_PUBLIC_API_URL],
-  ["EXPO_PUBLIC_FIREBASE_PROJECT_ID", process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID],
-  ["EXPO_PUBLIC_GOOGLE_MAPS_API_KEY", process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY],
-  ["EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID", process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID],
-  ["EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID", process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID],
-] as const;
-
 const appConfiguration = require("../../app.json").expo;
 const sensitiveConfigurationValues = [
   process.env.EXPO_PUBLIC_API_URL,
@@ -42,11 +38,6 @@ const sensitiveConfigurationValues = [
 ]
   .filter((value): value is string => Boolean(value?.trim()))
   .map((value) => value.trim());
-
-const validateEnv = () =>
-  requiredEnvironment
-    .filter(([, value]) => !value?.trim())
-    .map(([name]) => name);
 
 const maskSensitiveConfigurationValues = (value: string) =>
   sensitiveConfigurationValues.reduce(
@@ -177,38 +168,22 @@ export default function StartupRoot({
   crashlyticsStartupPromise,
 }: StartupRootProps) {
   const [startup, setStartup] = useState<StartupState>({ status: "loading" });
-  const [crashlyticsUnavailable, setCrashlyticsUnavailable] = useState(false);
 
   useEffect(() => {
     let mounted = true;
 
-    const missingVariables = validateEnv();
-    if (missingVariables.length > 0) {
-      const message = `Configuration manquante : ${missingVariables.join(", ")}`;
-      recordSanitizedError(message, crashlyticsClient);
-      setStartup({
-        status: "error",
-        message,
-        error: Object.assign(new Error(message), {
-          name: "ConfigurationError",
-          code: "MISSING_CONFIG",
-        }),
-      });
-      return () => {
-        mounted = false;
-      };
-    }
-
+    setFirebaseAvailability(!firebaseStartupError);
+    setCrashlyticsAvailability(false);
     if (firebaseStartupError) {
       recordSanitizedError("Firebase native app initialization failed", crashlyticsClient);
     }
 
     void crashlyticsStartupPromise.then(
       (error) => {
-        if (mounted && error) setCrashlyticsUnavailable(true);
+        if (mounted) setCrashlyticsAvailability(!error);
       },
       () => {
-        if (mounted) setCrashlyticsUnavailable(true);
+        if (mounted) setCrashlyticsAvailability(false);
       },
     );
 
@@ -263,16 +238,6 @@ export default function StartupRoot({
   const App = startup.App;
   return (
     <View style={styles.appContainer}>
-      {firebaseStartupError ? (
-        <Text accessibilityRole="alert" style={styles.warning}>
-          Firebase est indisponible ; certaines fonctionnalités peuvent être limitées.
-        </Text>
-      ) : null}
-      {crashlyticsUnavailable ? (
-        <Text accessibilityRole="alert" style={styles.warning}>
-          Crashlytics est indisponible ; les rapports d'erreur ne seront pas envoyés.
-        </Text>
-      ) : null}
       <RootErrorBoundary crashlyticsClient={crashlyticsClient}>
         <App />
       </RootErrorBoundary>
@@ -322,13 +287,5 @@ const styles = StyleSheet.create({
     color: "#334155",
     fontSize: 12,
     lineHeight: 18,
-  },
-  warning: {
-    backgroundColor: "#fef3c7",
-    color: "#78350f",
-    fontSize: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    textAlign: "center",
   },
 });

@@ -5,6 +5,7 @@ import {
   CreditCard,
   Edit3,
   Globe,
+  Info,
   Lock,
   LogOut,
   MapPin,
@@ -17,6 +18,7 @@ import {
   User,
 } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
+import * as Updates from "expo-updates";
 import { useNavigation, type NavigationProp } from "@react-navigation/native";
 import {
   openProfileStore,
@@ -42,6 +44,7 @@ import { useAuth } from "../context/AuthContext";
 import VoiceTextInput from "../components/VoiceTextInput";
 import { API_BASE_URL, apiFetch } from "../services/api";
 import type { RootStackParamList } from "../navigation/types";
+import { getTechnicalAvailability } from "../startup/technicalStatus";
 
 type Country = {
   name: string;
@@ -131,7 +134,7 @@ const ACTIVITIES = [
 
 export default function ProfileScreen() {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
-  const { isOffline, signOut, user } = useAuth();
+  const { isOffline, requestAuthentication, signOut, user } = useAuth();
   const [selectedCountry, setSelectedCountry] = useState<Country>(COUNTRIES[3]);
   const [countryMenuOpen, setCountryMenuOpen] = useState(false);
   const [contacts, setContacts] = useState<TrustedContact[]>([]);
@@ -163,6 +166,9 @@ export default function ProfileScreen() {
   const [phoneOtp, setPhoneOtp] = useState("");
   const [phoneOtpRequested, setPhoneOtpRequested] = useState(false);
   const [isUpdatingPhone, setIsUpdatingPhone] = useState(false);
+  const [aboutVisible, setAboutVisible] = useState(false);
+  const [termsVisible, setTermsVisible] = useState(false);
+  const [technicalStatus] = useState(getTechnicalAvailability);
 
   useEffect(() => {
     let isMounted = true;
@@ -209,6 +215,11 @@ export default function ProfileScreen() {
   useEffect(() => {
     let isMounted = true;
     void (async () => {
+      if (!user) {
+        setProfile(null);
+        setProfileError(null);
+        return;
+      }
       if (!API_BASE_URL) {
         setProfileError(
           "L'adresse du serveur n'est pas configurée (EXPO_PUBLIC_API_URL).",
@@ -242,7 +253,7 @@ export default function ProfileScreen() {
     return () => {
       isMounted = false;
     };
-  }, [user?.badge]);
+  }, [user?.badge, user?.id]);
 
   const selectCountry = async (country: Country) => {
     const database = databaseRef.current;
@@ -604,6 +615,117 @@ export default function ProfileScreen() {
           : 3;
     void updatePreferences({ ...preferences, defaultRadiusKm: nextRadius });
   };
+
+  if (!user) {
+    return (
+      <View style={styles.screen}>
+        <ScrollView contentContainerStyle={styles.guestContent}>
+          <Text style={styles.guestEyebrow}>VOTRE ESPACE</Text>
+          <Text accessibilityRole="header" style={styles.guestTitle}>Profil</Text>
+          <View style={styles.guestSignIn}>
+            <Text style={styles.guestSignInTitle}>Bienvenue dans le quartier</Text>
+            <Text style={styles.guestSignInCopy}>Connectez-vous pour accéder à votre profil et à vos services personnels.</Text>
+            <Pressable accessibilityRole="button" onPress={requestAuthentication} style={styles.guestPrimary}>
+              <Text style={styles.guestPrimaryText}>Se connecter</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={requestAuthentication} style={styles.guestSecondary}>
+              <Text style={styles.guestSecondaryText}>Créer un compte</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.guestSection}>
+            <Text style={styles.guestSectionTitle}>Langue</Text>
+            <View style={styles.guestLanguageRow}>
+              {[{ id: "fr", label: "Français" }, { id: "en", label: "English" }].map((language) => (
+                <Pressable
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: preferences.language === language.id }}
+                  key={language.id}
+                  onPress={() => void updatePreferences({ ...preferences, language: language.id as AppPreferences["language"] })}
+                  style={[styles.guestLanguage, preferences.language === language.id && styles.guestLanguageSelected]}
+                >
+                  <Text style={[styles.guestLanguageText, preferences.language === language.id && styles.guestLanguageTextSelected]}>{language.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.guestSection}>
+            <Text style={styles.guestSectionTitle}>Urgences, sans compte</Text>
+            <Text style={styles.guestSectionCopy}>Numéros disponibles même sans connexion internet.</Text>
+            <ScrollView horizontal contentContainerStyle={styles.guestCountryRow} showsHorizontalScrollIndicator={false}>
+              {COUNTRIES.map((country) => (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: country.code === selectedCountry.code }}
+                  key={country.code}
+                  onPress={() => setSelectedCountry(country)}
+                  style={[styles.guestCountry, country.code === selectedCountry.code && styles.guestCountrySelected]}
+                >
+                  <Text style={[styles.guestCountryText, country.code === selectedCountry.code && styles.guestCountryTextSelected]}>{country.code}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <Pressable accessibilityRole="button" onPress={() => void callNumber(selectedCountry.emergencyNumbers.medical)} style={styles.guestEmergencyCall}>
+              <PhoneCall color="#fff" size={19} />
+              <Text style={styles.guestEmergencyCallText}>Appeler les secours · {selectedCountry.emergencyNumbers.medical}</Text>
+            </Pressable>
+            {EMERGENCY_SERVICES.map((service) => {
+              const Icon = service.icon;
+              return (
+                <Pressable accessibilityRole="button" key={service.id} onPress={() => void callNumber(selectedCountry.emergencyNumbers[service.id])} style={styles.guestEmergencyRow}>
+                  <Icon color="#b9382f" size={18} />
+                  <Text style={styles.guestEmergencyName}>{service.name}</Text>
+                  <Text style={styles.guestEmergencyNumber}>{selectedCountry.emergencyNumbers[service.id]}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <View style={styles.guestSection}>
+            <Pressable accessibilityRole="button" onPress={() => setAboutVisible(true)} style={styles.guestLinkRow}>
+              <Info color="#53605a" size={18} />
+              <Text style={styles.guestLinkText}>À propos</Text>
+              <ChevronRight color="#8a8b82" size={18} />
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={() => setTermsVisible(true)} style={styles.guestLinkRow}>
+              <Shield color="#53605a" size={18} />
+              <Text style={styles.guestLinkText}>Conditions d’utilisation</Text>
+              <ChevronRight color="#8a8b82" size={18} />
+            </Pressable>
+          </View>
+        </ScrollView>
+        <Modal animationType="slide" onRequestClose={() => setAboutVisible(false)} transparent visible={aboutVisible}>
+          <View style={styles.guestModalBackdrop}>
+            <View style={styles.guestModal}>
+              <Text accessibilityRole="header" style={styles.guestModalTitle}>À propos de QuartierPlus</Text>
+              <Text style={styles.guestMetadata}>Version : {require("../../app.json").expo.version}</Text>
+              <Text style={styles.guestMetadata}>Update ID : {Updates.updateId ?? "Version intégrée à l’APK"}</Text>
+              <Text style={styles.guestMetadata}>Canal : {Updates.channel ?? "—"}</Text>
+              <Text style={styles.guestMetadata}>Runtime : {Updates.runtimeVersion ?? "—"}</Text>
+              <Text style={styles.guestTechnicalTitle}>Détails techniques</Text>
+              <Text style={styles.guestMetadata}>Firebase : {technicalStatus.firebase}</Text>
+              <Text style={styles.guestMetadata}>Crashlytics : {technicalStatus.crashlytics}</Text>
+              <Pressable accessibilityRole="button" onPress={() => setAboutVisible(false)} style={styles.guestModalClose}>
+                <Text style={styles.guestModalCloseText}>Fermer</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+        <Modal animationType="slide" onRequestClose={() => setTermsVisible(false)} transparent visible={termsVisible}>
+          <View style={styles.guestModalBackdrop}>
+            <View style={styles.guestModal}>
+              <Text accessibilityRole="header" style={styles.guestModalTitle}>Conditions d’utilisation</Text>
+              <Text style={styles.guestModalCopy}>Utilisez les services de quartier avec respect. Les fonctions de publication et de mise en relation nécessitent un compte. En cas d’urgence, appelez directement les services de secours de votre pays.</Text>
+              <Pressable accessibilityRole="button" onPress={() => setTermsVisible(false)} style={styles.guestModalClose}>
+                <Text style={styles.guestModalCloseText}>Fermer</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.screen}>
@@ -1722,4 +1844,42 @@ const styles = StyleSheet.create({
     color: "#94a3b8",
     fontSize: 10,
   },
+  guestContent: { gap: 14, padding: 20, paddingBottom: 36, paddingTop: 58 },
+  guestEyebrow: { color: "#28765c", fontSize: 10, fontWeight: "800", letterSpacing: 1.2 },
+  guestTitle: { color: "#252823", fontSize: 27, fontWeight: "800", marginTop: -10 },
+  guestSignIn: { backgroundColor: "#fffdf8", borderColor: "#e5e2d8", borderRadius: 8, borderWidth: 1, padding: 16 },
+  guestSignInTitle: { color: "#252823", fontSize: 17, fontWeight: "700" },
+  guestSignInCopy: { color: "#65675e", fontSize: 13, lineHeight: 19, marginTop: 6 },
+  guestPrimary: { alignItems: "center", backgroundColor: "#252823", borderRadius: 7, justifyContent: "center", marginTop: 14, minHeight: 46 },
+  guestPrimaryText: { color: "#fff", fontSize: 14, fontWeight: "700" },
+  guestSecondary: { alignItems: "center", justifyContent: "center", minHeight: 42 },
+  guestSecondaryText: { color: "#252823", fontSize: 13, fontWeight: "700" },
+  guestSection: { backgroundColor: "#fffdf8", borderColor: "#e5e2d8", borderRadius: 8, borderWidth: 1, padding: 14 },
+  guestSectionTitle: { color: "#252823", fontSize: 15, fontWeight: "700" },
+  guestSectionCopy: { color: "#65675e", fontSize: 12, marginTop: 5 },
+  guestLanguageRow: { flexDirection: "row", gap: 8, marginTop: 10 },
+  guestLanguage: { alignItems: "center", borderColor: "#d8d7cf", borderRadius: 7, borderWidth: 1, flex: 1, justifyContent: "center", minHeight: 40 },
+  guestLanguageSelected: { backgroundColor: "#e9f4ed", borderColor: "#28765c" },
+  guestLanguageText: { color: "#65675e", fontSize: 13, fontWeight: "600" },
+  guestLanguageTextSelected: { color: "#28765c" },
+  guestCountryRow: { gap: 8, paddingVertical: 12 },
+  guestCountry: { alignItems: "center", borderColor: "#d8d7cf", borderRadius: 7, borderWidth: 1, height: 38, justifyContent: "center", width: 54 },
+  guestCountrySelected: { backgroundColor: "#e9f4ed", borderColor: "#28765c" },
+  guestCountryText: { color: "#65675e", fontSize: 12, fontWeight: "700" },
+  guestCountryTextSelected: { color: "#28765c" },
+  guestEmergencyCall: { alignItems: "center", backgroundColor: "#b9382f", borderRadius: 7, flexDirection: "row", gap: 9, justifyContent: "center", minHeight: 48 },
+  guestEmergencyCallText: { color: "#fff", fontSize: 13, fontWeight: "700" },
+  guestEmergencyRow: { alignItems: "center", borderBottomColor: "#efede6", borderBottomWidth: 1, flexDirection: "row", gap: 10, minHeight: 44 },
+  guestEmergencyName: { color: "#444840", flex: 1, fontSize: 12 },
+  guestEmergencyNumber: { color: "#252823", fontSize: 13, fontWeight: "800" },
+  guestLinkRow: { alignItems: "center", borderBottomColor: "#efede6", borderBottomWidth: 1, flexDirection: "row", gap: 10, minHeight: 48 },
+  guestLinkText: { color: "#444840", flex: 1, fontSize: 13, fontWeight: "600" },
+  guestModalBackdrop: { backgroundColor: "rgba(20, 25, 21, 0.42)", flex: 1, justifyContent: "flex-end" },
+  guestModal: { backgroundColor: "#fffdf8", borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 22, paddingBottom: 32 },
+  guestModalTitle: { color: "#252823", fontSize: 19, fontWeight: "800", marginBottom: 16 },
+  guestMetadata: { color: "#444840", fontSize: 13, lineHeight: 22 },
+  guestTechnicalTitle: { color: "#252823", fontSize: 14, fontWeight: "800", marginBottom: 3, marginTop: 14 },
+  guestModalCopy: { color: "#444840", fontSize: 14, lineHeight: 22 },
+  guestModalClose: { alignItems: "center", backgroundColor: "#252823", borderRadius: 7, justifyContent: "center", marginTop: 20, minHeight: 46 },
+  guestModalCloseText: { color: "#fff", fontSize: 14, fontWeight: "700" },
 });

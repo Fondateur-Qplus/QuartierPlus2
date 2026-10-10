@@ -112,7 +112,7 @@ const formatDate = (date: string) => {
 };
 
 export default function FeedScreen() {
-  const { isOffline } = useAuth();
+  const { authStatus, isOffline } = useAuth();
   const [entries, setEntries] = useState<FeedEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -140,6 +140,26 @@ export default function FeedScreen() {
     const loadFeed = async () => {
       setError(null);
       try {
+        if (authStatus === "guest") {
+          if (!API_BASE_URL || isOffline) {
+            setEntries([]);
+            setError("Les annonces publiques seront disponibles dès que la connexion sera rétablie.");
+            return;
+          }
+          const response = await apiFetch(`${API_BASE_URL}/v1/public/marketplace`, {
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            throw new Error("Le serveur se réveille. Les annonces seront disponibles dans un instant.");
+          }
+          const payload: unknown = await response.json();
+          const rawPosts = recordsFrom(payload, "items");
+          const posts = rawPosts.map(normalizePost).filter(
+            (entry): entry is FeedEntry => entry !== null,
+          );
+          if (!cancelled) setEntries(sortEntries(posts));
+          return;
+        }
         if (!API_BASE_URL) {
           throw new Error("L'adresse du serveur n'est pas configurée.");
         }
@@ -201,6 +221,15 @@ export default function FeedScreen() {
         if (!cancelled) setEntries(sortEntries([...posts, ...alerts]));
       } catch (loadError) {
         if (cancelled || controller.signal.aborted) return;
+        if (authStatus === "guest") {
+          setEntries([]);
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Les annonces publiques sont temporairement indisponibles.",
+          );
+          return;
+        }
         let cachedCount = 0;
         try {
           cachedCount = await loadCachedFeed();
@@ -226,7 +255,7 @@ export default function FeedScreen() {
       cancelled = true;
       controller.abort();
     };
-  }, [isOffline, loadCachedFeed, refreshKey]);
+  }, [authStatus, isOffline, loadCachedFeed, refreshKey]);
 
   const refresh = () => {
     setIsRefreshing(true);
@@ -239,7 +268,9 @@ export default function FeedScreen() {
         <View>
           <Text style={styles.eyebrow}>QUARTIERPLUS</Text>
           <Text style={styles.title}>Fil du quartier</Text>
-          <Text style={styles.subtitle}>Publications et alertes à proximité</Text>
+          <Text style={styles.subtitle}>
+            {authStatus === "guest" ? "Annonces publiques du quartier" : "Publications et alertes à proximité"}
+          </Text>
         </View>
         <Pressable
           accessibilityLabel="Actualiser le fil"

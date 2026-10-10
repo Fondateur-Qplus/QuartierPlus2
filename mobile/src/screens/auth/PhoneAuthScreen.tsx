@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,6 +15,7 @@ import {
 import { useAuth, type AuthUser } from "../../context/AuthContext";
 import api from "../../services/api";
 import GoogleAuthScreen from "./GoogleAuthScreen";
+import type { RootStackParamList } from "../../navigation/types";
 
 const COUNTRIES = [
   { name: "Burkina Faso", prefix: "+226" },
@@ -36,7 +39,8 @@ const responseError = (error: unknown, fallback: string) => {
 };
 
 export default function PhoneAuthScreen() {
-  const { setSession } = useAuth();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { setSession, user } = useAuth();
   const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
@@ -44,6 +48,20 @@ export default function PhoneAuthScreen() {
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    const hasCompletedProfile =
+      typeof user.name === "string" && user.name.trim().length > 0 &&
+      typeof user.neighborhood === "string" && user.neighborhood.trim().length > 0;
+    if (!hasCompletedProfile) {
+      navigation.replace("CompleteProfile");
+    } else if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.replace("Main", { screen: "Accueil" });
+    }
+  }, [navigation, user]);
 
   useEffect(() => {
     if (secondsRemaining <= 0) return undefined;

@@ -187,7 +187,15 @@ const normalizeSearchText = (text: string) =>
 
 export default function MarketplaceScreen() {
   const route = useRoute<RouteProp<MainTabParamList, "Marche">>();
-  const { isOffline, queueOfflineAction } = useAuth();
+  const { authStatus, isOffline, queueOfflineAction, requestAuthentication } = useAuth();
+
+  const requireConnectedUser = () => {
+    if (authStatus !== "connected") {
+      requestAuthentication();
+      return false;
+    }
+    return true;
+  };
   const [activeTab, setActiveTab] = useState<MarketTab>("Annonces");
   const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
   const [countryMenuOpen, setCountryMenuOpen] = useState(false);
@@ -402,6 +410,7 @@ export default function MarketplaceScreen() {
       : `${new Intl.NumberFormat("fr-FR").format(item.price ?? 0)} ${item.currency}`;
 
   const contactSeller = async (item: MarketplaceItem) => {
+    if (!requireConnectedUser()) return;
     const whatsappPhone = item.whatsappPhone.replace(/[^\d]/g, "");
     const phone = item.phone.replace(/[^\d+]/g, "");
     const message = `Bonjour, je suis intéressé par votre annonce « ${item.name} ».`;
@@ -455,6 +464,7 @@ export default function MarketplaceScreen() {
   };
 
   const openCreateForm = () => {
+    if (!requireConnectedUser()) return;
     setDraftTitle("");
     setDraftDescription("");
     setDraftPrice("");
@@ -519,6 +529,7 @@ export default function MarketplaceScreen() {
   };
 
   const publishItem = async () => {
+    if (!requireConnectedUser()) return;
     const numericPrice = Number(
       draftPrice.replace(/\s/g, "").replace(",", "."),
     );
@@ -639,6 +650,7 @@ export default function MarketplaceScreen() {
   };
 
   const submitReport = async () => {
+    if (!requireConnectedUser()) return;
     if (!selectedReportItem) return;
     if (!reportReason.trim()) {
       Alert.alert("Motif requis", "Précisez pourquoi cette annonce doit être signalée.");

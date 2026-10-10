@@ -47,6 +47,10 @@ export type AuthUser = {
 type AuthContextValue = {
   user: AuthUser | null;
   token: string | null;
+  authStatus: "loading" | "guest" | "connected";
+  authPromptVisible: boolean;
+  requestAuthentication: () => void;
+  dismissAuthPrompt: () => void;
   isOffline: boolean;
   isSessionLoading: boolean;
   authError: string | null;
@@ -133,6 +137,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [isOffline, setIsOffline] = useState(true);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authPromptVisible, setAuthPromptVisible] = useState(false);
   const networkWasOnline = useRef(false);
   const isSyncingQueue = useRef(false);
   const pushTokenRef = useRef<string | null>(null);
@@ -245,6 +250,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setIsSessionLoading(false);
   }, []);
 
+  const requestAuthentication = useCallback(() => {
+    setAuthPromptVisible(true);
+  }, []);
+  const dismissAuthPrompt = useCallback(() => {
+    setAuthPromptVisible(false);
+  }, []);
+
   const queueOfflineAction = useCallback(
     async (actionType: SyncActionType, payload: Record<string, unknown>) => {
       if (!user?.id) {
@@ -301,6 +313,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     () => ({
       user,
       token,
+      authStatus: isSessionLoading ? "loading" : user ? "connected" : "guest",
+      authPromptVisible,
+      requestAuthentication,
+      dismissAuthPrompt,
       isOffline,
       isSessionLoading,
       authError,
@@ -312,6 +328,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     [
       user,
       token,
+      isSessionLoading,
+      authPromptVisible,
+      requestAuthentication,
+      dismissAuthPrompt,
       isOffline,
       isSessionLoading,
       authError,

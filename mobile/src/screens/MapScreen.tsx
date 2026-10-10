@@ -322,7 +322,15 @@ const createRegion = (center: Coordinates, radiusMeters: ScopeMeters): Region =>
 
 export default function MapScreen() {
   const route = useRoute<RouteProp<MainTabParamList, "CarteSOS">>();
-  const { token, isOffline, queueOfflineAction } = useAuth();
+  const { authStatus, requestAuthentication, token, isOffline, queueOfflineAction } = useAuth();
+
+  const requireConnectedUser = useCallback(() => {
+    if (authStatus !== "connected") {
+      requestAuthentication();
+      return false;
+    }
+    return true;
+  }, [authStatus, requestAuthentication]);
   const [userLocation, setUserLocation] = useState<Coordinates | null>(null);
   const [initialRegion, setInitialRegion] = useState<Region | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
@@ -369,6 +377,7 @@ export default function MapScreen() {
       if (!API_BASE_URL) return undefined;
       const controller = new AbortController();
       const loadSponsoredPins = async () => {
+        if (authStatus !== "connected") return;
         try {
           const query = new URLSearchParams({
             radius_m: String(selectedScope),
@@ -416,11 +425,11 @@ export default function MapScreen() {
       };
       void loadSponsoredPins();
       return () => controller.abort();
-    }, [selectedScope, userLocation]),
+    }, [authStatus, selectedScope, userLocation]),
   );
 
   const activeAlerts = sosAlerts.filter((alert) => alert.status === "ACTIVE");
-  const visibleAlerts = userLocation
+  const visibleAlerts = authStatus === "connected" && userLocation
     ? activeAlerts.filter(
         (alert) =>
           distanceMeters(userLocation, alert.coordinates) <= selectedScope,
@@ -513,17 +522,20 @@ export default function MapScreen() {
   }, []);
 
   useEffect(() => {
-    if (!API_BASE_URL || !userLocation) return;
+    if (!API_BASE_URL || (!userLocation && authStatus !== "guest")) return;
     const controller = new AbortController();
     const loadMarkers = async () => {
       try {
-        const query = new URLSearchParams({
-          latitude: String(userLocation.latitude),
-          longitude: String(userLocation.longitude),
-          radius_m: String(selectedScope),
-        });
+        const query = new URLSearchParams({ radius_m: String(selectedScope) });
+        if (authStatus === "connected" && userLocation) {
+          query.set("latitude", String(userLocation.latitude));
+          query.set("longitude", String(userLocation.longitude));
+        }
+        const endpoint = authStatus === "guest"
+          ? `${API_BASE_URL}/v1/public/map/markers?${query.toString()}`
+          : `${API_BASE_URL}/v1/map/markers?${query.toString()}`;
         const response = await apiFetch(
-          `${API_BASE_URL}/v1/map/markers?${query.toString()}`,
+          endpoint,
           { signal: controller.signal },
         );
         if (!response.ok) {
@@ -560,7 +572,7 @@ export default function MapScreen() {
     };
     void loadMarkers();
     return () => controller.abort();
-  }, [isOffline, selectedScope, userLocation]);
+  }, [authStatus, isOffline, selectedScope, userLocation]);
 
   useEffect(() => {
     if (activeAlerts.length === 0) {
@@ -684,14 +696,14 @@ export default function MapScreen() {
 
   useEffect(() => {
     const activeSocket = socketRef.current;
-    if (socketState !== "connected" || !activeSocket?.connected || !userLocation) {
+    if (authStatus !== "connected" || socketState !== "connected" || !activeSocket?.connected || !userLocation) {
       return;
     }
     activeSocket.emit("sos:location_update", {
       latitude: userLocation.latitude,
       longitude: userLocation.longitude,
     });
-  }, [socketState, userLocation]);
+  }, [authStatus, socketState, userLocation]);
 
   const handleSosAlert = useCallback((payload: unknown) => {
     const alert = normalizeSos(payload);
@@ -741,6 +753,10 @@ export default function MapScreen() {
   };
 
   const openSosCamera = async () => {
+    if (authStatus !== "connected") {
+      requestAuthentication();
+      return;
+    }
     setCaptureError(null);
     setEmergencyImageUri(null);
     setIsCaptureAudioReady(false);
@@ -1001,6 +1017,7 @@ export default function MapScreen() {
   };
 
   const helpOnSos = async (alert: SosAlert) => {
+    if (!requireConnectedUser()) return;
     if (!API_BASE_URL) {
       Alert.alert(
         "Connexion indisponible",
@@ -1026,6 +1043,7 @@ export default function MapScreen() {
   };
 
   const reportFakeSos = async (alert: SosAlert) => {
+    if (!requireConnectedUser()) return;
     if (!API_BASE_URL || isReporting) {
       if (!API_BASE_URL) {
         Alert.alert(
@@ -1065,6 +1083,10 @@ export default function MapScreen() {
   };
 
   const reportOutage = async (category: "POWER_OUTAGE" | "WATER_OUTAGE") => {
+    if (authStatus !== "connected") {
+      requestAuthentication();
+      return;
+    }
     if (!API_BASE_URL) {
       Alert.alert(
         "Connexion indisponible",
@@ -1114,6 +1136,10 @@ export default function MapScreen() {
   };
 
   const confirmOutage = async (marker: MapMarker) => {
+    if (authStatus !== "connected") {
+      requestAuthentication();
+      return;
+    }
     if (!API_BASE_URL || !userLocation) {
       Alert.alert(
         "Connexion indisponible",
@@ -1477,6 +1503,7 @@ export default function MapScreen() {
           <View style={styles.alertActions}>
             <Pressable
               accessibilityRole="button"
+              disabled={authStatus !== "connected"}
               onPress={() => void helpOnSos(selectedSos)}
               style={styles.assistButton}
             >
@@ -1485,7 +1512,7 @@ export default function MapScreen() {
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              disabled={isReporting}
+              disabled={authStatus !== "connected" || isReporting}
               onPress={() => void reportFakeSos(selectedSos)}
               style={styles.fakeReportButton}
             >
@@ -1582,12 +1609,19 @@ export default function MapScreen() {
         <Camera color="#ffffff" size={18} />
         <Text style={styles.evidenceFabText}>Ajouter photo/audio</Text>
       </Pressable>
-      <SosButton
-        location={userLocation}
-        onAlert={handleSosAlert}
-        openRequestId={route.params?.voiceSosRequestId}
-        socket={socketRef.current}
-      />
+      {authStatus === "connected" ? (
+        <SosButton
+          location={userLocation}
+          onAlert={handleSosAlert}
+          openRequestId={route.params?.voiceSosRequestId}
+          socket={socketRef.current}
+        />
+      ) : (
+        <Pressable accessibilityRole="button" onPress={requestAuthentication} style={styles.guestSosButton}>
+          <ShieldAlert color="#fff" size={19} />
+          <Text style={styles.guestSosText}>SOS · Se connecter</Text>
+        </Pressable>
+      )}
 
       <Modal
         animationType="fade"
@@ -2592,4 +2626,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 15,
   },
+  guestSosButton: {
+    alignItems: "center",
+    backgroundColor: "#b9382f",
+    borderRadius: 28,
+    bottom: 28,
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "center",
+    minHeight: 48,
+    paddingHorizontal: 18,
+    position: "absolute",
+    right: 16,
+  },
+  guestSosText: { color: "#fff", fontSize: 13, fontWeight: "800" },
 });
