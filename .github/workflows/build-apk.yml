@@ -23,6 +23,70 @@ jobs:
       - name: 🏗 Checkout repo
         uses: actions/checkout@v4
 
+      - name: 🔎 Vérifier l’URL et la disponibilité de l’API
+        env:
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
+          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+        run: |
+          MISSING_CONFIG=""
+          for name in EXPO_PUBLIC_API_URL EXPO_PUBLIC_FIREBASE_PROJECT_ID EXPO_PUBLIC_GOOGLE_MAPS_API_KEY; do
+            if [ -z "$(printenv "$name" | tr -d '[:space:]')" ]; then
+              MISSING_CONFIG="$MISSING_CONFIG $name"
+            fi
+          done
+          if [ -n "$MISSING_CONFIG" ]; then
+            echo "::error::Configuration de build absente ou vide :$MISSING_CONFIG."
+            exit 1
+          fi
+
+          API_HOST="$(node -e '
+            const value = process.env.EXPO_PUBLIC_API_URL;
+            if (!value.startsWith("https://")) {
+              console.error("::error::EXPO_PUBLIC_API_URL doit commencer par https://.");
+              process.exit(1);
+            }
+            if (value.endsWith("/")) {
+              console.error("::error::EXPO_PUBLIC_API_URL ne doit pas se terminer par /.");
+              process.exit(1);
+            }
+            if (/\/health|\/api|invalid/i.test(value)) {
+              console.error("::error::EXPO_PUBLIC_API_URL ne doit contenir ni /health, ni /api, ni « invalid ».");
+              process.exit(1);
+            }
+            try {
+              const url = new URL(value);
+              if (url.protocol !== "https:" || !url.hostname) throw new Error();
+              process.stdout.write(url.host);
+            } catch {
+              console.error("::error::EXPO_PUBLIC_API_URL n’est pas une URL HTTPS valide.");
+              process.exit(1);
+            }
+          ')" || exit 1
+          RESPONSE_FILE="$(mktemp)"
+          trap 'rm -f "$RESPONSE_FILE"' EXIT
+
+          for attempt in 1 2 3 4 5 6; do
+            HTTP_CODE="$(curl --silent --output "$RESPONSE_FILE" --write-out '%{http_code}' --max-time 15 "$EXPO_PUBLIC_API_URL/health" || true)"
+            HTTP_CODE="${HTTP_CODE:-000}"
+            echo "Hôte : $API_HOST — HTTP $HTTP_CODE"
+            if [ "$HTTP_CODE" = "200" ] && node -e '
+              try {
+                process.exit(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).status === "ok" ? 0 : 1);
+              } catch {
+                process.exit(1);
+              }
+            ' "$RESPONSE_FILE"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 6 ]; then
+              sleep 20
+            fi
+          done
+
+          echo "::error::L’API n’a pas répondu avec HTTP 200 et status « ok » après 6 tentatives."
+          exit 1
+
       - name: 🟢 Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -187,6 +251,11 @@ jobs:
           EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
           EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
           EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL }}
         run: |
           cd mobile
           npx expo prebuild --clean
@@ -201,6 +270,11 @@ jobs:
           EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
           EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
           EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL }}
         run: |
           ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" help
           ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" \
@@ -216,6 +290,11 @@ jobs:
           EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
           EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
           EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL }}
         run: |
           ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" \
             -x lintVitalAnalyzeRelease \
