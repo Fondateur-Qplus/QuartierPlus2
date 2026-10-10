@@ -2,6 +2,7 @@ const { registerRootComponent } = require("expo");
 const React = require("react");
 const ErrorUtils = global.ErrorUtils;
 const previousGlobalHandler = ErrorUtils?.getGlobalHandler?.();
+let firebaseStartupError = null;
 let crashlyticsClient = null;
 
 const reportSanitizedError = (message) => {
@@ -12,6 +13,14 @@ const reportSanitizedError = (message) => {
     console.error("Impossible de transmettre l'erreur à Crashlytics.");
   }
 };
+
+try {
+  const firebase = require("@react-native-firebase/app").default;
+  firebase.app();
+} catch (error) {
+  firebaseStartupError = error;
+  console.warn("Firebase natif est indisponible au démarrage.");
+}
 
 const reportGlobalError = (isFatal) => {
   reportSanitizedError(`Unhandled JavaScript error; fatal=${isFatal}`);
@@ -24,35 +33,33 @@ if (ErrorUtils?.setGlobalHandler) {
   });
 }
 
-let crashlyticsStartupPromise;
-try {
-  const crashlytics = require("@react-native-firebase/crashlytics").default;
-  crashlyticsClient = crashlytics();
-  const version = require("./app.json").expo.version;
-  crashlyticsStartupPromise = crashlyticsClient
-    .setCrashlyticsCollectionEnabled(true)
-    .then(() => {
-      crashlyticsClient.log("app_start");
-      crashlyticsClient.recordError(
-        new Error(`startup_ok version=${version}`),
-      );
-      return null;
-    })
-    .catch(() => {
-      console.error("Impossible d'initialiser la collecte Crashlytics.");
-      return "Firebase/Crashlytics n'a pas pu être initialisé.";
-    });
-} catch {
-  console.error("Impossible de charger Firebase Crashlytics.");
+let crashlyticsStartupPromise = Promise.resolve(null);
+if (firebaseStartupError) {
   crashlyticsStartupPromise = Promise.resolve(
-    "Firebase/Crashlytics n'a pas pu être initialisé.",
+    new Error("Crashlytics indisponible car Firebase n'a pas démarré."),
   );
+} else {
+  try {
+    const crashlytics = require("@react-native-firebase/crashlytics").default;
+    crashlyticsClient = crashlytics();
+    crashlyticsStartupPromise = crashlyticsClient
+      .setCrashlyticsCollectionEnabled(true)
+      .then(() => null)
+      .catch((error) => {
+        console.warn("Crashlytics est indisponible au démarrage.");
+        return error;
+      });
+  } catch (error) {
+    console.warn("Impossible de charger Crashlytics.");
+    crashlyticsStartupPromise = Promise.resolve(error);
+  }
 }
 
 const StartupRoot = require("./src/startup/StartupRoot").default;
 registerRootComponent(() =>
   React.createElement(StartupRoot, {
     crashlyticsClient,
+    firebaseStartupError,
     crashlyticsStartupPromise,
   }),
 );
