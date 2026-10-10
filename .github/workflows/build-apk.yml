@@ -130,6 +130,11 @@ jobs:
           EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
           EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
           EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL }}
         run: |
           GOOGLE_SERVICES_FILE=mobile/google-services.json
           if [ ! -f "$GOOGLE_SERVICES_FILE" ]; then
@@ -238,9 +243,24 @@ jobs:
           if ! printf '%s' "$EXPO_PUBLIC_GOOGLE_MAPS_API_KEY" | grep -q '[^[:space:]]'; then
             MISSING_CONFIG="$MISSING_CONFIG EXPO_PUBLIC_GOOGLE_MAPS_API_KEY"
           fi
+          if ! printf '%s' "$EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID" | grep -q '[^[:space:]]'; then
+            MISSING_CONFIG="$MISSING_CONFIG EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID"
+          fi
+          if ! printf '%s' "$EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID" | grep -q '[^[:space:]]'; then
+            MISSING_CONFIG="$MISSING_CONFIG EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID"
+          fi
           if [ -n "$MISSING_CONFIG" ]; then
             echo "::error::Configuration de build absente ou vide :$MISSING_CONFIG."
             exit 1
+          fi
+          if ! printf '%s' "$EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" | grep -q '[^[:space:]]'; then
+            echo "::warning::EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID absent ; la connexion Google iOS ne sera pas configurée."
+          fi
+          if ! printf '%s' "$EXPO_PUBLIC_EAS_PROJECT_ID" | grep -q '[^[:space:]]'; then
+            echo "::warning::EXPO_PUBLIC_EAS_PROJECT_ID absent ; l’application utilisera l’identifiant EAS défini dans app.json."
+          fi
+          if ! printf '%s' "$EXPO_PUBLIC_LIVEKIT_URL" | grep -q '[^[:space:]]'; then
+            echo "::warning::EXPO_PUBLIC_LIVEKIT_URL absent ; les fonctionnalités LiveKit seront indisponibles."
           fi
 
       - name: Expo prebuild
@@ -255,10 +275,11 @@ jobs:
           EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
           EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
           EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
           EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL }}
         run: |
           cd mobile
-          npx expo prebuild --clean
+          npx expo prebuild --clean --platform android
 
       - name: Gradle compilation validation
         if: inputs.etape == 'compilation'
@@ -274,6 +295,7 @@ jobs:
           EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
           EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
           EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
           EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL }}
         run: |
           ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" help
@@ -294,6 +316,7 @@ jobs:
           EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
           EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
           EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
           EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL }}
         run: |
           ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" \

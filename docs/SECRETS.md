@@ -18,11 +18,14 @@ Configurer comme secrets GitHub :
 - `EXPO_PUBLIC_API_URL` — URL de l'API consommée par l'application.
 - `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` — clé SDK Android Maps; injectée dans le
   manifeste Android par `app.config.js`, jamais écrite dans un fichier suivi.
-- `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`
-- `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`
-- `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`
-- `EXPO_PUBLIC_LIVEKIT_URL`
-- `EXPO_PUBLIC_EAS_PROJECT_ID`
+- `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` — obligatoire pour le build Android.
+- `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` — obligatoire pour l'authentification
+  Google.
+- `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` — optionnel pour les builds iOS.
+- `EXPO_PUBLIC_EAS_PROJECT_ID` — optionnel; l'identifiant défini dans `app.json`
+  est utilisé en son absence.
+- `EXPO_PUBLIC_LIVEKIT_URL` — optionnel; son absence désactive les fonctions
+  LiveKit et déclenche un avertissement dans le workflow.
 
 Les valeurs `EXPO_PUBLIC_*` sont intégrées au client et ne doivent donc jamais
 contenir de secret serveur. Le workflow ne transmet au prebuild et à Gradle que
