@@ -31,11 +31,11 @@ jobs:
 
           ACCOUNT_FILE="$(mktemp)"
           trap 'rm -f "$ACCOUNT_FILE"' EXIT
-          if ! eas whoami > "$ACCOUNT_FILE"; then
+          if ! eas whoami > "$ACCOUNT_FILE" 2>&1; then
             echo "::error::Impossible d’authentifier le CLI EAS avec EXPO_TOKEN."
             exit 1
           fi
-          ACCOUNT="$(tr -d '\r\n ' < "$ACCOUNT_FILE" | sed 's/^@//')"
+          ACCOUNT="$(sed -n '1{s/^[[:space:]@]*//;s/[[:space:](:].*$//;p;}' "$ACCOUNT_FILE")"
           echo "$ACCOUNT"
           if [ "$ACCOUNT" != "quartierplus_bf" ]; then
             echo "::error::Le compte Expo connecté doit être quartierplus_bf."
