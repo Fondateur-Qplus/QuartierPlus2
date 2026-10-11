@@ -1,0 +1,126 @@
+name: EAS setup
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Installer EAS CLI
+        run: npm install --global eas-cli
+
+      - name: Vérifier le compte Expo
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$(printenv EXPO_TOKEN | tr -d '[:space:]')" ]; then
+            echo "::error::Le secret EXPO_TOKEN est absent."
+            exit 1
+          fi
+
+          ACCOUNT_FILE="$(mktemp)"
+          trap 'rm -f "$ACCOUNT_FILE"' EXIT
+          if ! eas whoami > "$ACCOUNT_FILE"; then
+            echo "::error::Impossible d’authentifier le CLI EAS avec EXPO_TOKEN."
+            exit 1
+          fi
+          ACCOUNT="$(tr -d '\r\n ' < "$ACCOUNT_FILE" | sed 's/^@//')"
+          echo "$ACCOUNT"
+          if [ "$ACCOUNT" != "quartierplus_bf" ]; then
+            echo "::error::Le compte Expo connecté doit être quartierplus_bf."
+            exit 1
+          fi
+
+          node -e '
+            const config = require("./app.json").expo;
+            const projectId = "fe1302fc-1f61-4787-96c3-5fbf4948737b";
+            if (
+              config.owner !== "quartierplus_bf" ||
+              config.slug !== "quartierplus" ||
+              config.extra?.eas?.projectId !== projectId ||
+              config.updates?.url !== `https://u.expo.dev/${projectId}` ||
+              config.updates?.enabled !== true ||
+              config.updates?.requestHeaders?.["expo-channel-name"] !== "preview" ||
+              config.runtimeVersion?.policy !== "appVersion" ||
+              config.updates?.checkAutomatically !== "ON_LOAD"
+            ) {
+              console.error("::error::La configuration Expo ne correspond pas au projet EAS quartierplus.");
+              process.exit(1);
+            }
+          '
+
+      - name: Créer et relier preview à la branche preview
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          BRANCHES="$(mktemp)"
+          CHANNELS="$(mktemp)"
+          trap 'rm -f "$BRANCHES" "$CHANNELS"' EXIT
+
+          if ! eas branch:list --limit 100 --json > "$BRANCHES"; then
+            echo "::error::Impossible de lister les branches EAS; vérifier le jeton et le projet quartierplus."
+            exit 1
+          fi
+          if ! node -e '
+            const fs = require("node:fs");
+            const [collection, target, file] = process.argv.slice(1);
+            const contains = (value, root = true) => {
+              if (Array.isArray(value)) {
+                return root && value.some((item) => item?.name === target);
+              }
+              if (!value || typeof value !== "object") return false;
+              if (Array.isArray(value[collection])) {
+                return value[collection].some((item) => item?.name === target);
+              }
+              return ["data", "result"].some((key) => contains(value[key], false));
+            };
+            process.exit(contains(JSON.parse(fs.readFileSync(file, "utf8"))) ? 0 : 1);
+          ' branches preview "$BRANCHES"; then
+            if ! eas branch:create preview --non-interactive; then
+              echo "::error::Impossible de créer la branche EAS preview."
+              exit 1
+            fi
+          fi
+
+          if ! eas channel:list --limit 25 --json > "$CHANNELS"; then
+            echo "::error::Impossible de lister les canaux EAS; vérifier le jeton et le projet quartierplus."
+            exit 1
+          fi
+          if ! node -e '
+            const fs = require("node:fs");
+            const [collection, target, file] = process.argv.slice(1);
+            const contains = (value, root = true) => {
+              if (Array.isArray(value)) {
+                return root && value.some((item) => item?.name === target);
+              }
+              if (!value || typeof value !== "object") return false;
+              if (Array.isArray(value[collection])) {
+                return value[collection].some((item) => item?.name === target);
+              }
+              return ["data", "result"].some((key) => contains(value[key], false));
+            };
+            process.exit(contains(JSON.parse(fs.readFileSync(file, "utf8"))) ? 0 : 1);
+          ' channels preview "$CHANNELS"; then
+            if ! eas channel:create preview --non-interactive; then
+              echo "::error::Impossible de créer le canal EAS preview."
+              exit 1
+            fi
+          fi
+
+          if ! eas channel:edit preview --branch preview --non-interactive; then
+            echo "::error::Impossible de relier le canal EAS preview à la branche preview."
+            exit 1
+          fi
+          echo "Le canal EAS preview pointe vers la branche preview."

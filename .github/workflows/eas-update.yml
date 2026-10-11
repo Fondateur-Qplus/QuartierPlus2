@@ -7,32 +7,114 @@ on:
         description: Message pour la mise à jour EAS
         type: string
         required: false
-        default: ''
+        default: ""
 
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: 🏗 Checkout repo
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: 🟢 Setup Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: 🚀 Install EAS CLI
-        run: npm install -g eas-cli
-
-      - name: 📦 Install dependencies
+      - name: Vérifier la configuration et réveiller l’API
+        env:
+          EXPO_PUBLIC_FIREBASE_API_KEY: ${{ secrets.EXPO_PUBLIC_FIREBASE_API_KEY }}
+          EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ secrets.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
+          EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
+          EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
+          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL }}
         run: |
-          cd mobile
-          npm ci
+          MISSING_CONFIG=""
+          for name in EXPO_PUBLIC_API_URL EXPO_PUBLIC_FIREBASE_PROJECT_ID EXPO_PUBLIC_GOOGLE_MAPS_API_KEY EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID; do
+            if [ -z "$(printenv "$name" | tr -d '[:space:]')" ]; then
+              MISSING_CONFIG="$MISSING_CONFIG $name"
+            fi
+          done
+          if [ -n "$MISSING_CONFIG" ]; then
+            echo "::error::Configuration absente ou vide :$MISSING_CONFIG."
+            exit 1
+          fi
 
-      - name: 📲 Publish EAS Update
+          API_HOST="$(node -e '
+            const value = process.env.EXPO_PUBLIC_API_URL;
+            if (!value.startsWith("https://") || value.endsWith("/") || /\/health|\/api|invalid/i.test(value)) {
+              console.error("::error::EXPO_PUBLIC_API_URL doit être une URL HTTPS valide, sans /health ni /api.");
+              process.exit(1);
+            }
+            try {
+              const url = new URL(value);
+              if (url.protocol !== "https:" || !url.hostname) throw new Error();
+              process.stdout.write(url.host);
+            } catch {
+              console.error("::error::EXPO_PUBLIC_API_URL n’est pas une URL HTTPS valide.");
+              process.exit(1);
+            }
+          ')" || exit 1
+
+          if [ -n "$EXPO_PUBLIC_EAS_PROJECT_ID" ] && [ "$EXPO_PUBLIC_EAS_PROJECT_ID" != "fe1302fc-1f61-4787-96c3-5fbf4948737b" ]; then
+            echo "::error::EXPO_PUBLIC_EAS_PROJECT_ID ne correspond pas au projet quartierplus."
+            exit 1
+          fi
+
+          RESPONSE_FILE="$(mktemp)"
+          trap 'rm -f "$RESPONSE_FILE"' EXIT
+          for attempt in 1 2 3 4 5 6; do
+            HTTP_CODE="$(curl --silent --output "$RESPONSE_FILE" --write-out '%{http_code}' --max-time 15 "$EXPO_PUBLIC_API_URL/health" || true)"
+            HTTP_CODE="${HTTP_CODE:-000}"
+            echo "Hôte : $API_HOST — HTTP $HTTP_CODE"
+            if [ "$HTTP_CODE" = "200" ] && node -e '
+              try {
+                process.exit(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).status === "ok" ? 0 : 1);
+              } catch {
+                process.exit(1);
+              }
+            ' "$RESPONSE_FILE"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 6 ]; then sleep 20; fi
+          done
+          echo "::error::L’API n’a pas répondu HTTP 200 avec status « ok » après 6 tentatives."
+          exit 1
+
+      - name: Installer EAS CLI
+        run: npm install --global eas-cli
+
+      - name: Publier sur la branche preview
+        working-directory: mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_FIREBASE_API_KEY: ${{ secrets.EXPO_PUBLIC_FIREBASE_API_KEY }}
+          EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ secrets.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
+          EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
+          EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
+          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL }}
+          EXPO_PUBLIC_GIT_SHA: ${{ github.sha }}
           UPDATE_MESSAGE: ${{ inputs.message || format('Manual EAS update from {0}', github.sha) }}
         run: |
-          cd mobile
-          eas update --branch preview --message "$UPDATE_MESSAGE" --non-interactive
+          npm ci
+          eas update \
+            --branch preview \
+            --environment preview \
+            --platform android \
+            --message "$UPDATE_MESSAGE" \
+            --non-interactive

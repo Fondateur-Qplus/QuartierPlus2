@@ -105,7 +105,11 @@
       "policy": "appVersion"
     },
     "updates": {
+      "enabled": true,
       "url": "https://u.expo.dev/fe1302fc-1f61-4787-96c3-5fbf4948737b",
+      "requestHeaders": {
+        "expo-channel-name": "preview"
+      },
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     }
