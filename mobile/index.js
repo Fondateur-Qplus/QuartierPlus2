@@ -5,13 +5,24 @@ const previousGlobalHandler = ErrorUtils?.getGlobalHandler?.();
 let firebaseStartupError = null;
 let crashlyticsClient = null;
 
+console.info("app_start");
+
 const reportSanitizedError = (message) => {
-  if (!crashlyticsClient) return;
+  if (!crashlyticsClient) return false;
   try {
     crashlyticsClient.recordError(new Error(message));
+    return true;
   } catch {
     console.error("Impossible de transmettre l'erreur à Crashlytics.");
+    return false;
   }
+};
+
+const safeErrorCode = (error) => {
+  if (typeof error !== "object" || error === null) return "erreur inconnue";
+  if (typeof error.code === "string") return error.code.slice(0, 80);
+  if (typeof error.name === "string") return error.name.slice(0, 80);
+  return "erreur inconnue";
 };
 
 try {
@@ -19,7 +30,9 @@ try {
   firebase.app();
 } catch (error) {
   firebaseStartupError = error;
-  console.warn("Firebase natif est indisponible au démarrage.");
+  console.warn(
+    `Firebase natif est indisponible au démarrage (${safeErrorCode(error)}).`,
+  );
 }
 
 const reportGlobalError = (isFatal) => {
@@ -44,9 +57,16 @@ if (firebaseStartupError) {
     crashlyticsClient = crashlytics();
     crashlyticsStartupPromise = crashlyticsClient
       .setCrashlyticsCollectionEnabled(true)
-      .then(() => null)
+      .then(() => {
+        if (!reportSanitizedError("startup_ok")) {
+          throw new Error("Crashlytics ne peut pas enregistrer startup_ok.");
+        }
+        return null;
+      })
       .catch((error) => {
-        console.warn("Crashlytics est indisponible au démarrage.");
+        console.warn(
+          `Crashlytics est indisponible au démarrage (${safeErrorCode(error)}).`,
+        );
         return error;
       });
   } catch (error) {

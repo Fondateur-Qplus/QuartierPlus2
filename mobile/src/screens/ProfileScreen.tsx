@@ -44,7 +44,10 @@ import { useAuth } from "../context/AuthContext";
 import VoiceTextInput from "../components/VoiceTextInput";
 import { API_BASE_URL, apiFetch } from "../services/api";
 import type { RootStackParamList } from "../navigation/types";
-import { getTechnicalAvailability } from "../startup/technicalStatus";
+import {
+  getTechnicalAvailability,
+  subscribeToTechnicalAvailability,
+} from "../startup/technicalStatus";
 
 type Country = {
   name: string;
@@ -168,7 +171,12 @@ export default function ProfileScreen() {
   const [isUpdatingPhone, setIsUpdatingPhone] = useState(false);
   const [aboutVisible, setAboutVisible] = useState(false);
   const [termsVisible, setTermsVisible] = useState(false);
-  const [technicalStatus] = useState(getTechnicalAvailability);
+  const [technicalStatus, setTechnicalStatus] = useState(getTechnicalAvailability);
+
+  useEffect(
+    () => subscribeToTechnicalAvailability(() => setTechnicalStatus(getTechnicalAvailability())),
+    [],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -703,6 +711,9 @@ export default function ProfileScreen() {
               <Text style={styles.guestMetadata}>Update ID : {Updates.updateId ?? "Version intégrée à l’APK"}</Text>
               <Text style={styles.guestMetadata}>Canal : {Updates.channel ?? "—"}</Text>
               <Text style={styles.guestMetadata}>Runtime : {Updates.runtimeVersion ?? "—"}</Text>
+              <Text style={styles.guestMetadata}>
+                SHA du commit : {process.env.EXPO_PUBLIC_GIT_SHA ?? "non fourni"}
+              </Text>
               <Text style={styles.guestTechnicalTitle}>Détails techniques</Text>
               <Text style={styles.guestMetadata}>Firebase : {technicalStatus.firebase}</Text>
               <Text style={styles.guestMetadata}>Crashlytics : {technicalStatus.crashlytics}</Text>

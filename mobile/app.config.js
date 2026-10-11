@@ -1,5 +1,9 @@
 module.exports = ({ config }) => ({
   ...config,
+  extra: {
+    ...config.extra,
+    commitSha: process.env.EXPO_PUBLIC_GIT_SHA ?? "unknown",
+  },
   plugins: config.plugins.map((plugin) =>
     Array.isArray(plugin) && plugin[0] === "react-native-maps"
       ? [
