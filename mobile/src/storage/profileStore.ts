@@ -89,9 +89,9 @@ const openProfileDatabase = () => {
         )
       : [];
 
-    await database.withTransactionAsync(async () => {
+    await database.withExclusiveTransactionAsync(async (transaction) => {
       if (activeCountry) {
-        await database.runAsync(
+        await transaction.runAsync(
           `INSERT INTO profile_settings (key, value)
            VALUES ('active_country', ?)
            ON CONFLICT(key) DO NOTHING`,
@@ -99,7 +99,7 @@ const openProfileDatabase = () => {
         );
       }
       for (const contact of contacts) {
-        await database.runAsync(
+        await transaction.runAsync(
           `INSERT INTO trusted_contacts (id, name, phone, position)
            VALUES (?, ?, ?, ?)
            ON CONFLICT(id) DO NOTHING`,
@@ -109,7 +109,7 @@ const openProfileDatabase = () => {
           contact.position,
         );
       }
-      await database.runAsync(
+      await transaction.runAsync(
         `INSERT INTO profile_settings (key, value)
          VALUES ('legacy_store_migrated', 'true')
          ON CONFLICT(key) DO NOTHING`,
@@ -161,10 +161,10 @@ export const openProfileStore = async (): Promise<ProfileStore> => {
       );
     },
     async deleteContact(id, remainingContacts) {
-      await database.withTransactionAsync(async () => {
-        await database.runAsync("DELETE FROM trusted_contacts WHERE id = ?", id);
+      await database.withExclusiveTransactionAsync(async (transaction) => {
+        await transaction.runAsync("DELETE FROM trusted_contacts WHERE id = ?", id);
         for (const contact of remainingContacts) {
-          await database.runAsync(
+          await transaction.runAsync(
             "UPDATE trusted_contacts SET position = ? WHERE id = ?",
             contact.position,
             contact.id,
@@ -194,9 +194,9 @@ export const openProfileStore = async (): Promise<ProfileStore> => {
         ["sos_notifications", String(preferences.sosNotificationsEnabled)],
         ["default_radius_km", String(preferences.defaultRadiusKm)],
       ];
-      await database.withTransactionAsync(async () => {
+      await database.withExclusiveTransactionAsync(async (transaction) => {
         for (const [key, value] of entries) {
-          await database.runAsync(
+          await transaction.runAsync(
             `INSERT INTO app_preferences (key, value)
              VALUES (?, ?)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value`,

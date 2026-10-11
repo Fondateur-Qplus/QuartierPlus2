@@ -46,6 +46,7 @@ export default function VoiceAssistantModal({
     recognitionAvailable,
     registerAssistantHandler,
     registerDictationHandler,
+    setAssistantActive,
     setRecognitionAvailable,
   } = useVoiceAssistant();
   const [isVisible, setIsVisible] = useState(false);
@@ -255,6 +256,7 @@ export default function VoiceAssistantModal({
     setError("");
     setTranscript("");
     setFeedback("");
+    setAssistantActive(true);
     setIsVisible(true);
 
     try {
@@ -377,6 +379,7 @@ export default function VoiceAssistantModal({
     if (sosTimerRef.current) clearInterval(sosTimerRef.current);
     sosTimerRef.current = null;
     isVisibleRef.current = false;
+    setAssistantActive(false);
     ExpoSpeechRecognitionModule.abort();
     Speech.stop();
     clearActiveInput();
@@ -460,21 +463,6 @@ export default function VoiceAssistantModal({
 
   return (
     <>
-      {recognitionAvailable ? (
-        <Pressable
-          accessibilityLabel="Ouvrir l’assistant vocal"
-          accessibilityHint="Dicter du texte ou exécuter une commande vocale."
-          accessibilityRole="button"
-          onPress={() => void startListening()}
-          style={[
-            styles.floatingButton,
-            isListening && styles.floatingButtonActive,
-          ]}
-        >
-          <Mic color="#ffffff" size={22} />
-        </Pressable>
-      ) : null}
-
       <Modal
         animationType="fade"
         onRequestClose={close}
@@ -655,26 +643,6 @@ export default function VoiceAssistantModal({
 }
 
 const styles = StyleSheet.create({
-  floatingButton: {
-    alignItems: "center",
-    backgroundColor: "#2563eb",
-    borderColor: "#ffffff",
-    borderRadius: 30,
-    borderWidth: 2,
-    bottom: 82,
-    elevation: 8,
-    height: 56,
-    justifyContent: "center",
-    position: "absolute",
-    right: 18,
-    shadowColor: "#0f172a",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 5,
-    width: 56,
-    zIndex: 20,
-  },
-  floatingButtonActive: { backgroundColor: "#dc2626" },
   unavailable: {
     backgroundColor: "#fff7ed",
     borderRadius: 8,

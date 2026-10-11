@@ -78,7 +78,7 @@ const saveCollection = async (
   entries: unknown[],
 ) => {
   const database = await getDatabase();
-  await database.withTransactionAsync(async () => {
+  await database.withExclusiveTransactionAsync(async (transaction) => {
     for (const entry of entries) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
         throw new Error(`Entrée invalide pour ${table}.`);
@@ -87,7 +87,7 @@ const saveCollection = async (
       if (typeof id !== "string" && typeof id !== "number") {
         throw new Error(`Chaque entrée ${table} doit avoir un identifiant.`);
       }
-      await database.runAsync(
+      await transaction.runAsync(
         `INSERT INTO ${table} (id, payload, cached_at)
          VALUES (?, ?, CURRENT_TIMESTAMP)
          ON CONFLICT(id) DO UPDATE SET
@@ -97,7 +97,7 @@ const saveCollection = async (
         JSON.stringify(entry),
       );
     }
-    await database.execAsync(
+    await transaction.execAsync(
       `DELETE FROM ${table}
        WHERE id NOT IN (
          SELECT id FROM ${table}
@@ -140,7 +140,7 @@ export const cacheMessages = async (
 ): Promise<void> => {
   if (!threadKey.trim()) throw new Error("La conversation à mettre en cache est invalide.");
   const database = await getDatabase();
-  await database.withTransactionAsync(async () => {
+  await database.withExclusiveTransactionAsync(async (transaction) => {
     for (const message of messages) {
       if (!message || typeof message !== "object" || Array.isArray(message)) {
         throw new Error("Un message à mettre en cache est invalide.");
@@ -149,7 +149,7 @@ export const cacheMessages = async (
       if (typeof id !== "string" && typeof id !== "number") {
         throw new Error("Chaque message mis en cache doit avoir un identifiant.");
       }
-      await database.runAsync(
+      await transaction.runAsync(
         `INSERT INTO cached_messages (thread_key, message_id, payload, cached_at)
          VALUES (?, ?, ?, CURRENT_TIMESTAMP)
          ON CONFLICT(thread_key, message_id) DO UPDATE SET
@@ -160,7 +160,7 @@ export const cacheMessages = async (
         JSON.stringify(message),
       );
     }
-    await database.runAsync(
+    await transaction.runAsync(
       `DELETE FROM cached_messages
        WHERE thread_key = ? AND message_id NOT IN (
          SELECT message_id FROM cached_messages

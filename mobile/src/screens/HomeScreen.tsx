@@ -30,6 +30,9 @@ import {
   Text,
   View,
 } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+import type { MainTabParamList } from "../navigation/types";
 import VoiceTextInput from "../components/VoiceTextInput";
 
 type Scope = "quartier" | "pays" | "monde";
@@ -54,6 +57,8 @@ const ASSISTANT_SUGGESTIONS = [
 ];
 
 export default function HomeScreen() {
+  const navigation =
+    useNavigation<BottomTabNavigationProp<MainTabParamList>>();
   const [scope, setScope] = useState<Scope>("quartier");
   const [isPureImmersion, setIsPureImmersion] = useState(false);
   const [isAllied, setIsAllied] = useState(false);
@@ -396,23 +401,13 @@ export default function HomeScreen() {
           </Pressable>
 
           <Pressable
-            accessibilityLabel="Ouvrir l'Assistant Vocal QuartierPlus"
-            accessibilityRole="button"
-            onPress={() => setActiveModal("assistant")}
-            style={styles.assistantFab}
-          >
-            <Bot color="#ffffff" size={21} />
-            <Sparkles color="#a7f3d0" size={12} style={styles.assistantSparkle} />
-          </Pressable>
-
-          <Pressable
-            accessibilityLabel="Créer une publication"
+            accessibilityLabel="Créer une annonce avec photo"
             accessibilityRole="button"
             onPress={() =>
-              Alert.alert(
-                "Créer une vidéo",
-                "La caméra et la publication vidéo ne sont pas encore connectées.",
-              )
+              navigation.navigate("Marche", {
+                voiceRequestId: `quick-create-${Date.now()}`,
+                voiceCreateListing: true,
+              })
             }
             style={styles.createFab}
           >
@@ -1006,25 +1001,6 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 11,
     fontWeight: "800",
-  },
-  assistantFab: {
-    alignItems: "center",
-    backgroundColor: "#164e63",
-    borderColor: "rgba(167,243,208,0.85)",
-    borderRadius: 25,
-    borderWidth: 1.5,
-    bottom: 111,
-    height: 48,
-    justifyContent: "center",
-    position: "absolute",
-    right: 17,
-    width: 48,
-    zIndex: 3,
-  },
-  assistantSparkle: {
-    position: "absolute",
-    right: 4,
-    top: 4,
   },
   createFab: {
     alignItems: "center",

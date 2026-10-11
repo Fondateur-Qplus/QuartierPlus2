@@ -67,6 +67,7 @@ function MainTabs() {
         tabBarStyle: {
           backgroundColor: "#ffffff",
           borderTopColor: "#e2e8f0",
+          justifyContent: "space-around",
           height: 56 + insets.bottom,
           paddingBottom: Math.max(insets.bottom, 4),
           paddingTop: 6,
@@ -75,7 +76,9 @@ function MainTabs() {
           fontSize: 10,
           fontWeight: "500",
           includeFontPadding: false,
+          maxWidth: "100%",
         },
+        tabBarItemStyle: { flex: 1, minWidth: 0 },
       }}
     >
       <Tab.Screen
@@ -196,7 +199,7 @@ function RootNavigator() {
 
 function VoiceAssistantLayer({ currentRoute }: { currentRoute: string }) {
   const { isSessionLoading, requestAuthentication, user } = useAuth();
-  const { requestAssistant } = useVoiceAssistant();
+  const { isAssistantActive, requestAssistant } = useVoiceAssistant();
   const insets = useSafeAreaInsets();
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   useEffect(() => {
@@ -264,6 +267,7 @@ function VoiceAssistantLayer({ currentRoute }: { currentRoute: string }) {
   };
 
   const hideAssistant =
+    isAssistantActive ||
     keyboardVisible ||
     ["PhoneAuth", "CompleteProfile", "Welcome"].includes(currentRoute ?? "");
   const assistantBottom =

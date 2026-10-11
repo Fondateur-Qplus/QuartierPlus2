@@ -1,5 +1,13 @@
 import * as Location from "expo-location";
-import { AlertTriangle, MapPin, RefreshCw, ShoppingBag } from "lucide-react-native";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+import { useNavigation } from "@react-navigation/native";
+import {
+  AlertTriangle,
+  MapPin,
+  Plus,
+  RefreshCw,
+  ShoppingBag,
+} from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -18,6 +26,7 @@ import {
   getCachedPosts,
 } from "../services/db";
 import { API_BASE_URL, apiFetch } from "../services/api";
+import type { MainTabParamList } from "../navigation/types";
 
 type FeedEntry = {
   id: string;
@@ -134,6 +143,8 @@ const formatDate = (date: string) => {
 };
 
 export default function FeedScreen() {
+  const navigation =
+    useNavigation<BottomTabNavigationProp<MainTabParamList>>();
   const { authStatus, isOffline } = useAuth();
   const [entries, setEntries] = useState<FeedEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -318,6 +329,13 @@ export default function FeedScreen() {
     setRefreshKey((current) => current + 1);
   };
 
+  const createPublication = () => {
+    navigation.navigate("Marche", {
+      voiceRequestId: `quick-create-${Date.now()}`,
+      voiceCreateListing: true,
+    });
+  };
+
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
@@ -412,6 +430,14 @@ export default function FeedScreen() {
           )}
         </ScrollView>
       )}
+      <Pressable
+        accessibilityLabel="Créer une annonce avec photo"
+        accessibilityRole="button"
+        onPress={createPublication}
+        style={styles.createButton}
+      >
+        <Plus color="#ffffff" size={28} strokeWidth={2.5} />
+      </Pressable>
     </View>
   );
 }
@@ -470,4 +496,23 @@ const styles = StyleSheet.create({
   empty: { alignItems: "center", paddingHorizontal: 25, paddingTop: 65 },
   emptyTitle: { color: "#334155", fontSize: 17, fontWeight: "700", marginTop: 14 },
   emptyText: { color: "#64748b", fontSize: 13, lineHeight: 20, marginTop: 7, textAlign: "center" },
+  createButton: {
+    alignItems: "center",
+    alignSelf: "center",
+    backgroundColor: "#0f766e",
+    borderColor: "#ffffff",
+    borderRadius: 30,
+    borderWidth: 2,
+    bottom: 16,
+    elevation: 8,
+    height: 58,
+    justifyContent: "center",
+    position: "absolute",
+    shadowColor: "#0f172a",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    width: 58,
+    zIndex: 5,
+  },
 });

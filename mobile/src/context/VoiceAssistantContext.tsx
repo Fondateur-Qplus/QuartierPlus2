@@ -13,6 +13,8 @@ type VoiceAssistantContextValue = {
   registerDictationHandler: (start: () => void) => () => void;
   registerAssistantHandler: (start: () => void) => () => void;
   requestAssistant: () => void;
+  isAssistantActive: boolean;
+  setAssistantActive: (active: boolean) => void;
   requestDictation: () => void;
   recognitionAvailable: boolean | null;
   setRecognitionAvailable: (available: boolean) => void;
@@ -29,6 +31,7 @@ export function VoiceAssistantProvider({ children }: PropsWithChildren) {
   const [recognitionAvailable, setRecognitionAvailable] = useState<
     boolean | null
   >(null);
+  const [isAssistantActive, setAssistantActive] = useState(false);
 
   const registerInput = useCallback(
     (insertText: (text: string) => void) => {
@@ -81,12 +84,14 @@ export function VoiceAssistantProvider({ children }: PropsWithChildren) {
       value={{
         clearActiveInput,
         insertIntoFocusedInput,
+        isAssistantActive,
         recognitionAvailable,
         registerAssistantHandler,
         registerDictationHandler,
         registerInput,
         requestAssistant,
         requestDictation,
+        setAssistantActive,
         setRecognitionAvailable,
       }}
     >
