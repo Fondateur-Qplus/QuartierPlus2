@@ -16,6 +16,7 @@ import {
 import { useAuth, type AuthUser } from "../../context/AuthContext";
 import api from "../../services/api";
 import GoogleAuthScreen from "./GoogleAuthScreen";
+import { formatPhoneNumberE164 } from "./phoneNumber";
 import type { RootStackParamList } from "../../navigation/types";
 
 type PhoneCountry = {
@@ -211,11 +212,7 @@ export default function PhoneAuthScreen() {
   }, [secondsRemaining]);
 
   const fullPhoneNumber = () => {
-    const nationalNumber = phone.replace(/\D/g, "").replace(/^0+/, "");
-    if (nationalNumber.length < 6 || nationalNumber.length > 12) {
-      throw new Error("Saisissez un numéro de téléphone valide.");
-    }
-    return `${selectedCountry.prefix}${nationalNumber}`;
+    return formatPhoneNumberE164(phone, selectedCountry.prefix);
   };
 
   const normalizedIdentifier = () => {
