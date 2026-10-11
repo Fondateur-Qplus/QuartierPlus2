@@ -143,7 +143,7 @@ export default function MyTicketsScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { backgroundColor: "#f8fafc", flexGrow: 1, padding: 18, paddingTop: 58 },
+  content: { backgroundColor: "#f8fafc", flexGrow: 1, padding: 18, paddingBottom: 112, paddingTop: 58 },
   back: { color: "#2563eb", fontSize: 14, fontWeight: "600" },
   title: { color: "#172b4d", fontSize: 25, fontWeight: "800", marginTop: 18 },
   subtitle: { color: "#64748b", fontSize: 13, lineHeight: 19, marginTop: 6 },

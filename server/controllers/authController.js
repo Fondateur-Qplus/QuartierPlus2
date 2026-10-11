@@ -4,12 +4,18 @@ import { OAuth2Client } from "google-auth-library";
 import { env } from "../config/env.js";
 import { isOtpTestPhone } from "../config/otp.js";
 import { pool } from "../db/pool.js";
+import { deliverVerificationEmail, isEmailDeliveryConfigured } from "../services/email.js";
+import {
+  detectPhoneCountry,
+  normalizePhoneNumberE164,
+} from "../services/phoneNumber.js";
 
 const googleClient = new OAuth2Client(env.googleClientId || undefined);
 const OTP_TTL_MINUTES = 5;
 const OTP_MAX_ATTEMPTS = 5;
 const E164_PATTERN = /^\+[1-9]\d{7,14}$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const OTP_CHANNELS = new Set(["sms", "email"]);
 
 const hashOtp = (phoneNumber, code) =>
   createHmac("sha256", env.jwtSecret)
@@ -74,6 +80,7 @@ export const listCountries = async (_request, response, next) => {
     const result = await pool.query(
       `SELECT code, name, phone_prefix
        FROM country_config
+       WHERE is_active = TRUE
        ORDER BY name, code`,
     );
     return response.status(200).json({ countries: result.rows });
@@ -89,7 +96,15 @@ const googleVerificationFailure = (error) =>
 
 export const requestOtp = async (request, response, next) => {
   const flow = request.body?.flow === "register" ? "register" : "login";
+  const channel =
+    typeof request.query?.channel === "string"
+      ? request.query.channel
+      : request.body?.channel ?? "sms";
+  if (!OTP_CHANNELS.has(channel)) {
+    return response.status(400).json({ error: "Canal de vérification invalide." });
+  }
   let phoneNumber = "";
+  let recipientEmail = "";
   let registrationData = null;
 
   if (flow === "register") {
@@ -105,14 +120,16 @@ export const requestOtp = async (request, response, next) => {
       typeof request.body?.email === "string"
         ? request.body.email.trim().toLowerCase()
         : "";
-    const countryCode =
-      typeof request.body?.country_code === "string"
-        ? request.body.country_code.trim().toUpperCase()
-        : "";
-    phoneNumber =
+    const enteredPhone =
       typeof request.body?.phone_number === "string"
         ? request.body.phone_number.trim()
         : "";
+    phoneNumber = normalizePhoneNumberE164(enteredPhone) ?? "";
+    const requestedCountryCode =
+      typeof request.body?.country_code === "string"
+        ? request.body.country_code.trim().toUpperCase()
+        : "";
+    const countryCode = detectPhoneCountry(phoneNumber) ?? requestedCountryCode;
 
     if (
       !firstName ||
@@ -128,9 +145,9 @@ export const requestOtp = async (request, response, next) => {
     if (!EMAIL_PATTERN.test(email) || email.length > 255) {
       return response.status(400).json({ error: "Saisissez une adresse e-mail valide." });
     }
-    if (!E164_PATTERN.test(phoneNumber)) {
+    if (!phoneNumber) {
       return response.status(400).json({
-        error: "Le numéro de téléphone doit être au format international E.164.",
+        error: "Saisissez un numéro international valide, avec son indicatif.",
       });
     }
     if (request.body?.terms_accepted !== true) {
@@ -149,7 +166,7 @@ export const requestOtp = async (request, response, next) => {
         !phoneNumber.startsWith(country.rows[0].phone_prefix)
       ) {
         return response.status(400).json({
-          error: "Le pays sélectionné ne correspond pas à l’indicatif téléphonique.",
+          error: "Le numéro ne correspond pas au pays indiqué.",
         });
       }
       const existingAccount = await pool.query(
@@ -174,6 +191,7 @@ export const requestOtp = async (request, response, next) => {
       email,
       country_code: countryCode,
     };
+    recipientEmail = email;
   } else {
     const identifier =
       typeof request.body?.identifier === "string"
@@ -181,13 +199,14 @@ export const requestOtp = async (request, response, next) => {
         : typeof request.body?.phone_number === "string"
           ? request.body.phone_number.trim()
           : "";
-    if (E164_PATTERN.test(identifier)) {
-      phoneNumber = identifier;
+    const normalizedPhone = normalizePhoneNumberE164(identifier);
+    if (normalizedPhone) {
+      phoneNumber = normalizedPhone;
       try {
         const account = await pool.query(
-          `SELECT phone_number FROM users
+          `SELECT phone_number, email FROM users
            WHERE (phone_number = $1 OR phone_e164 = $1)
-             AND is_verified = TRUE
+             AND (is_verified = TRUE OR phone_verified_at IS NOT NULL OR email_verified_at IS NOT NULL)
            LIMIT 1`,
           [phoneNumber],
         );
@@ -197,16 +216,17 @@ export const requestOtp = async (request, response, next) => {
           });
         }
         phoneNumber = account.rows[0].phone_number ?? phoneNumber;
+        recipientEmail = account.rows[0].email ?? "";
       } catch (error) {
         return next(error);
       }
     } else if (EMAIL_PATTERN.test(identifier)) {
       try {
         const account = await pool.query(
-          `SELECT phone_number FROM users
+          `SELECT phone_number, email FROM users
            WHERE LOWER(email) = $1
-             AND is_verified = TRUE
              AND phone_number IS NOT NULL
+             AND (is_verified = TRUE OR phone_verified_at IS NOT NULL OR email_verified_at IS NOT NULL)
            LIMIT 1`,
           [identifier.toLowerCase()],
         );
@@ -216,12 +236,13 @@ export const requestOtp = async (request, response, next) => {
           });
         }
         phoneNumber = account.rows[0].phone_number;
+        recipientEmail = account.rows[0].email ?? identifier.toLowerCase();
       } catch (error) {
         return next(error);
       }
     } else {
       return response.status(400).json({
-        error: "Saisissez un téléphone au format +indicatif ou une adresse e-mail valide.",
+        error: "Saisissez un téléphone avec indicatif ou une adresse e-mail valide.",
       });
     }
     if (!E164_PATTERN.test(phoneNumber)) {
@@ -232,8 +253,18 @@ export const requestOtp = async (request, response, next) => {
   }
 
   const useTestOtp = isOtpTestPhone(phoneNumber, env);
-  if (!useTestOtp && (!env.smsDeliveryUrl || !env.smsDeliveryToken)) {
+  if (!useTestOtp && channel === "sms" && (!env.smsDeliveryUrl || !env.smsDeliveryToken)) {
     return response.status(503).json({ error: "Le service SMS est indisponible." });
+  }
+  if (!useTestOtp && channel === "email" && !isEmailDeliveryConfigured(env)) {
+    return response.status(503).json({
+      error: "L'envoi par e-mail n'est pas encore configuré, choisissez SMS.",
+    });
+  }
+  if (channel === "email" && !recipientEmail) {
+    return response.status(400).json({
+      error: "Aucune adresse e-mail n’est associée à ce compte.",
+    });
   }
 
   const code = useTestOtp
@@ -263,21 +294,31 @@ export const requestOtp = async (request, response, next) => {
     }
     await client.query(
       `INSERT INTO otp_verifications
-         (phone_number, code_hash, expires_at, attempts, created_at, registration_data)
-       VALUES ($1, $2, NOW() + INTERVAL '${OTP_TTL_MINUTES} minutes', 0, NOW(), $3::jsonb)
+         (phone_number, code_hash, expires_at, attempts, created_at, registration_data, channel)
+       VALUES ($1, $2, NOW() + INTERVAL '${OTP_TTL_MINUTES} minutes', 0, NOW(), $3::jsonb, $4)
        ON CONFLICT (phone_number) DO UPDATE SET
          code_hash = EXCLUDED.code_hash,
          expires_at = EXCLUDED.expires_at,
          attempts = 0,
          created_at = NOW(),
-         registration_data = EXCLUDED.registration_data`,
-      [phoneNumber, hashOtp(phoneNumber, code), JSON.stringify(registrationData)],
+         registration_data = EXCLUDED.registration_data,
+         channel = EXCLUDED.channel`,
+      [
+        phoneNumber,
+        hashOtp(phoneNumber, code),
+        JSON.stringify(registrationData),
+        channel,
+      ],
     );
     await client.query("COMMIT");
     otpStored = true;
-    if (!useTestOtp) await deliverOtp(phoneNumber, code);
+    if (!useTestOtp) {
+      if (channel === "sms") await deliverOtp(phoneNumber, code);
+      else await deliverVerificationEmail(env, recipientEmail, code, OTP_TTL_MINUTES);
+    }
     return response.status(200).json({
-      message: "Si le numéro est valide, un code de vérification a été envoyé.",
+      message: `Un code de vérification a été envoyé par ${channel === "sms" ? "SMS" : "e-mail"}.`,
+      ...(channel === "email" ? { challenge_identifier: recipientEmail } : {}),
       ...(useTestOtp ? { test_code: "123456" } : {}),
     });
   } catch (error) {
@@ -291,7 +332,7 @@ export const requestOtp = async (request, response, next) => {
       });
     if (otpStored && !useTestOtp) {
       return response.status(503).json({
-        error: "La livraison du code SMS a échoué. Réessayez plus tard.",
+        error: `La livraison du code par ${channel === "sms" ? "SMS" : "e-mail"} a échoué. Réessayez plus tard.`,
       });
     }
     return next(error);
@@ -462,41 +503,65 @@ export const verifyPhoneChangeOtp = async (request, response, next) => {
 };
 
 export const verifyOtp = async (request, response, next) => {
-  const identifier =
+  const suppliedIdentifier =
     typeof request.body?.identifier === "string"
       ? request.body.identifier.trim()
       : typeof request.body?.phone_number === "string"
         ? request.body.phone_number.trim()
         : "";
+  const phoneIdentifier = normalizePhoneNumberE164(suppliedIdentifier);
+  const identifier = phoneIdentifier ?? suppliedIdentifier.toLowerCase();
+  const channel = request.body?.channel ?? "sms";
   const code = typeof request.body?.code === "string" ? request.body.code : "";
-  if ((!E164_PATTERN.test(identifier) && !EMAIL_PATTERN.test(identifier)) || !/^\d{6}$/.test(code)) {
+  if (
+    (!phoneIdentifier && !EMAIL_PATTERN.test(identifier)) ||
+    !OTP_CHANNELS.has(channel) ||
+    !/^\d{6}$/.test(code)
+  ) {
     return response.status(400).json({ error: "Identifiant ou code invalide." });
   }
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    let phoneNumber = identifier;
-    if (EMAIL_PATTERN.test(identifier)) {
+    let phoneNumber = phoneIdentifier ?? "";
+    if (!phoneIdentifier) {
       const account = await client.query(
-        "SELECT phone_number FROM users WHERE LOWER(email) = $1 AND is_verified = TRUE FOR UPDATE",
-        [identifier.toLowerCase()],
+        `SELECT phone_number FROM users
+         WHERE LOWER(email) = $1 AND phone_number IS NOT NULL
+         FOR UPDATE`,
+        [identifier],
       );
-      if (account.rowCount === 0) {
+      if (account.rowCount > 0) {
+        phoneNumber = account.rows[0].phone_number;
+      } else {
+        const pendingRegistration = await client.query(
+          `SELECT phone_number FROM otp_verifications
+           WHERE LOWER(registration_data->>'email') = $1
+             AND channel = 'email' AND expires_at > NOW()
+           FOR UPDATE`,
+          [identifier],
+        );
+        phoneNumber = pendingRegistration.rows[0]?.phone_number ?? "";
+      }
+      if (!phoneNumber) {
         await client.query("ROLLBACK");
         return response.status(401).json({ error: "Code invalide ou expiré." });
       }
-      phoneNumber = account.rows[0].phone_number;
     }
     const verification = await client.query(
-      `SELECT code_hash, attempts, registration_data
+      `SELECT code_hash, attempts, registration_data, channel
        FROM otp_verifications
        WHERE phone_number = $1 AND expires_at > NOW()
        FOR UPDATE`,
       [phoneNumber],
     );
     const entry = verification.rows[0];
-    if (!entry || entry.attempts >= OTP_MAX_ATTEMPTS) {
+    if (
+      !entry ||
+      entry.attempts >= OTP_MAX_ATTEMPTS ||
+      (entry.channel ?? "sms") !== channel
+    ) {
       await client.query("ROLLBACK");
       return response.status(401).json({ error: "Code invalide ou expiré." });
     }
@@ -524,8 +589,10 @@ export const verifyOtp = async (request, response, next) => {
       result = await client.query(
         `INSERT INTO users
            (phone_number, phone_e164, email, full_name, first_name, last_name,
-            country_code, is_verified, phone_verified_at, terms_accepted_at)
-         VALUES ($1, $1, $2, $3, $4, $5, $6, TRUE, NOW(), NOW())
+            country_code, is_verified, phone_verified_at, email_verified_at, terms_accepted_at)
+         VALUES ($1, $1, $2, $3, $4, $5, $6, TRUE,
+                 CASE WHEN $7 = 'sms' THEN NOW() END,
+                 CASE WHEN $7 = 'email' THEN NOW() END, NOW())
          RETURNING id, phone_number, email, google_id, full_name, role,
                    neighborhood, country_code, reputation_score, is_verified`,
         [
@@ -535,6 +602,7 @@ export const verifyOtp = async (request, response, next) => {
           registration.first_name,
           registration.last_name,
           registration.country_code,
+          channel,
         ],
       );
     } else {
@@ -543,13 +611,16 @@ export const verifyOtp = async (request, response, next) => {
          SET phone_number = COALESCE(phone_number, $1),
              phone_e164 = COALESCE(phone_e164, $1),
              is_verified = TRUE,
-             phone_verified_at = COALESCE(phone_verified_at, NOW()),
+             phone_verified_at = CASE WHEN $3 = 'sms'
+               THEN COALESCE(phone_verified_at, NOW()) ELSE phone_verified_at END,
+             email_verified_at = CASE WHEN $3 = 'email'
+               THEN COALESCE(email_verified_at, NOW()) ELSE email_verified_at END,
              country_code = COALESCE(country_code, $2)
          WHERE (phone_number = $1 OR phone_e164 = $1)
            AND is_verified = TRUE
          RETURNING id, phone_number, email, google_id, full_name, role,
                    neighborhood, country_code, reputation_score, is_verified`,
-        [phoneNumber, await detectCountryCode(client, phoneNumber)],
+        [phoneNumber, await detectCountryCode(client, phoneNumber), channel],
       );
       if (result.rowCount === 0) {
         await client.query("ROLLBACK");

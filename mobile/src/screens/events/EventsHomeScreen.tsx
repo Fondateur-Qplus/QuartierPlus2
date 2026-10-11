@@ -287,7 +287,7 @@ function ActionButton({
 }
 
 const styles = StyleSheet.create({
-  content: { backgroundColor: "#f8fafc", flexGrow: 1, padding: 18, paddingTop: 56 },
+  content: { backgroundColor: "#f8fafc", flexGrow: 1, padding: 18, paddingBottom: 112, paddingTop: 56 },
   title: { color: "#172b4d", fontSize: 25, fontWeight: "800" },
   subtitle: { color: "#64748b", fontSize: 14, lineHeight: 20, marginTop: 6 },
   promoBanner: {

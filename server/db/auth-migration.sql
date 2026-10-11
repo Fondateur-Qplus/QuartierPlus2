@@ -9,7 +9,11 @@ ALTER TABLE users
     ADD COLUMN IF NOT EXISTS last_name VARCHAR(100),
     ADD COLUMN IF NOT EXISTS phone_e164 VARCHAR(16),
     ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ;
+
+ALTER TABLE country_config
+    ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
 
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx
     ON users (email)
@@ -29,7 +33,23 @@ CREATE TABLE IF NOT EXISTS otp_verifications (
 );
 
 ALTER TABLE otp_verifications
-    ADD COLUMN IF NOT EXISTS registration_data JSONB;
+    ADD COLUMN IF NOT EXISTS registration_data JSONB,
+    ADD COLUMN IF NOT EXISTS channel VARCHAR(10) NOT NULL DEFAULT 'sms';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'otp_verifications_channel_check'
+          AND conrelid = 'otp_verifications'::regclass
+    ) THEN
+        ALTER TABLE otp_verifications
+            ADD CONSTRAINT otp_verifications_channel_check
+            CHECK (channel IN ('sms', 'email'));
+    END IF;
+END
+$$;
 
 UPDATE users
 SET phone_e164 = phone_number

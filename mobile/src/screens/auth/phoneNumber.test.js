@@ -1,22 +1,35 @@
-import { formatPhoneNumberE164 } from "./phoneNumber";
+import {
+  EMBEDDED_PHONE_COUNTRIES,
+  formatPhoneNumberE164,
+  parseInternationalPhone,
+} from "./phoneNumber";
 
-describe("formatPhoneNumberE164", () => {
-  it("adds the selected country prefix to a local number", () => {
-    expect(formatPhoneNumberE164("56119567", "+226")).toBe("+22656119567");
+describe("international phone normalization", () => {
+  it("normalizes a plus-prefixed number to E.164 and detects its country", () => {
+    expect(formatPhoneNumberE164("+226 56 11 95 67")).toBe("+22656119567");
+    expect(parseInternationalPhone("+226 56 11 95 67")?.country?.name).toBe(
+      "Burkina Faso",
+    );
   });
 
-  it("cleans punctuation and the national trunk prefix", () => {
-    expect(formatPhoneNumberE164("05 61-19-567", "+226")).toBe("+22656119567");
+  it("normalizes the international 00 prefix", () => {
+    expect(formatPhoneNumberE164("0022656119567")).toBe("+22656119567");
   });
 
-  it("does not duplicate the selected prefix on an international number", () => {
-    expect(formatPhoneNumberE164("+226 56 11 95 67", "+226")).toBe("+22656119567");
-    expect(formatPhoneNumberE164("0022656119567", "+226")).toBe("+22656119567");
+  it("requires the country calling code", () => {
+    expect(() => formatPhoneNumberE164("56 11 95 67")).toThrow(
+      "Saisissez l’indicatif, par exemple +226…",
+    );
   });
 
-  it("rejects an international number with a different country prefix", () => {
-    expect(() => formatPhoneNumberE164("+225 56 11 95 67", "+226")).toThrow(
-      "Le pays sélectionné ne correspond pas à l’indicatif téléphonique.",
+  it("uses the embedded country table without a server request", () => {
+    expect(EMBEDDED_PHONE_COUNTRIES).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "BF", name: "Burkina Faso", prefix: "+226" }),
+        expect.objectContaining({ code: "CI", name: "Côte d’Ivoire", prefix: "+225" }),
+        expect.objectContaining({ code: "SN", name: "Sénégal", prefix: "+221" }),
+        expect.objectContaining({ code: "ML", name: "Mali", prefix: "+223" }),
+      ]),
     );
   });
 });

@@ -319,7 +319,7 @@ const styles = StyleSheet.create({
   instruction: { color: "#64748b", fontSize: 13, marginTop: -20, textAlign: "center" },
   speakersCard: { backgroundColor: "#ffffff", borderColor: "#e2e8f0", borderRadius: 15, borderWidth: 1, minHeight: 120, padding: 15 },
   speakersTitle: { color: "#334155", fontSize: 14, fontWeight: "700" },
-  speakersList: { gap: 12, paddingTop: 14 },
+  speakersList: { gap: 12, paddingBottom: 112, paddingTop: 14 },
   speakerRow: { alignItems: "center", flexDirection: "row", gap: 10 },
   speakerAvatar: { alignItems: "center", backgroundColor: "#dbeafe", borderRadius: 18, height: 36, justifyContent: "center", width: 36 },
   localAvatar: { backgroundColor: "#dc2626" },

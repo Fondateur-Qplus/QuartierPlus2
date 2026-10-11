@@ -43,6 +43,7 @@
     "expo-status-bar": "~57.0.1",
     "expo-updates": "~57.0.25",
     "expo-web-browser": "~57.0.3",
+    "libphonenumber-js": "1.11.20",
     "livekit-client": "^2.22.3",
     "lucide-react-native": "^1.50.0",
     "react": "19.2.3",

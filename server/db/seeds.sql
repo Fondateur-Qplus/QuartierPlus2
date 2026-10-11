@@ -215,6 +215,10 @@ ON CONFLICT (code) DO UPDATE SET
     firefighters_number = EXCLUDED.firefighters_number,
     ambulance_number = EXCLUDED.ambulance_number;
 
+UPDATE country_config
+SET is_active = TRUE
+WHERE code IN ('BF', 'CI', 'SN', 'ML');
+
 INSERT INTO country_phone_prefixes (country_code, phone_prefix)
 VALUES
     ('AD', '+376'),

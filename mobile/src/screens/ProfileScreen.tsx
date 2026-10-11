@@ -110,6 +110,13 @@ const ACTIVITIES = [
   { id: "alerts", label: "Mes Alertes & Signalements émis", icon: Siren },
 ];
 
+const PLUS_DESTINATIONS = [
+  { screen: "Talkie", label: "Talkie-Walkie" },
+  { screen: "Grin", label: "Grin" },
+  { screen: "EspacePro", label: "Pro" },
+  { screen: "Événements", label: "Événements" },
+] as const;
+
 export default function ProfileScreen() {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { isOffline, requestAuthentication, signOut, user } = useAuth();
@@ -147,6 +154,7 @@ export default function ProfileScreen() {
   const [aboutVisible, setAboutVisible] = useState(false);
   const [termsVisible, setTermsVisible] = useState(false);
   const [technicalStatus, setTechnicalStatus] = useState(getTechnicalAvailability);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
 
   useEffect(
     () => subscribeToTechnicalAvailability(() => setTechnicalStatus(getTechnicalAvailability())),
@@ -599,6 +607,12 @@ export default function ProfileScreen() {
     void updatePreferences({ ...preferences, defaultRadiusKm: nextRadius });
   };
 
+  const openPlusDestination = (
+    screen: "Talkie" | "Grin" | "EspacePro" | "Événements",
+  ) => {
+    navigation.navigate("Main", { screen });
+  };
+
   if (!user) {
     return (
       <View style={styles.screen}>
@@ -614,6 +628,29 @@ export default function ProfileScreen() {
             <Pressable accessibilityRole="button" onPress={requestAuthentication} style={styles.guestSecondary}>
               <Text style={styles.guestSecondaryText}>Créer un compte</Text>
             </Pressable>
+          </View>
+          <View style={styles.guestSection}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ expanded: plusMenuOpen }}
+              onPress={() => setPlusMenuOpen((open) => !open)}
+              style={styles.guestLinkRow}
+            >
+              <Text style={styles.guestSectionTitle}>Plus</Text>
+              <ChevronRight color="#8a8b82" size={18} />
+            </Pressable>
+            {plusMenuOpen &&
+              PLUS_DESTINATIONS.map(({ screen, label }) => (
+                <Pressable
+                  accessibilityRole="button"
+                  key={screen}
+                  onPress={() => openPlusDestination(screen)}
+                  style={styles.guestLinkRow}
+                >
+                  <Text style={styles.guestLinkText}>{label}</Text>
+                  <ChevronRight color="#8a8b82" size={18} />
+                </Pressable>
+              ))}
           </View>
 
           <View style={styles.guestSection}>
@@ -792,6 +829,34 @@ export default function ProfileScreen() {
             {profileError}
           </Text>
         )}
+
+        <View style={styles.countryCard}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: plusMenuOpen }}
+            onPress={() => setPlusMenuOpen((open) => !open)}
+            style={styles.guestLinkRow}
+          >
+            <Text style={styles.cardHeading}>Plus</Text>
+            <ChevronRight
+              color="#64748b"
+              size={19}
+              style={plusMenuOpen ? styles.chevronOpen : undefined}
+            />
+          </Pressable>
+          {plusMenuOpen &&
+            PLUS_DESTINATIONS.map(({ screen, label }) => (
+              <Pressable
+                accessibilityRole="button"
+                key={screen}
+                onPress={() => openPlusDestination(screen)}
+                style={styles.guestLinkRow}
+              >
+                <Text style={styles.menuLabel}>{label}</Text>
+                <ChevronRight color="#64748b" size={18} />
+              </Pressable>
+            ))}
+        </View>
 
         <Pressable
           accessibilityRole="button"
@@ -1290,7 +1355,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingBottom: 38,
+    paddingBottom: 118,
     paddingHorizontal: 20,
     paddingTop: 55,
   },
@@ -1830,7 +1895,7 @@ const styles = StyleSheet.create({
     color: "#94a3b8",
     fontSize: 10,
   },
-  guestContent: { gap: 14, padding: 20, paddingBottom: 36, paddingTop: 58 },
+  guestContent: { gap: 14, padding: 20, paddingBottom: 118, paddingTop: 58 },
   guestEyebrow: { color: "#28765c", fontSize: 10, fontWeight: "800", letterSpacing: 1.2 },
   guestTitle: { color: "#252823", fontSize: 27, fontWeight: "800", marginTop: -10 },
   guestSignIn: { backgroundColor: "#fffdf8", borderColor: "#e5e2d8", borderRadius: 8, borderWidth: 1, padding: 16 },

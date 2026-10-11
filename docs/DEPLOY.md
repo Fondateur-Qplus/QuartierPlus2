@@ -29,18 +29,22 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "postgis";
 ```
 
-Puis exécutez, dans cet ordre, le contenu des fichiers du dépôt :
+Puis exécutez, sans supprimer de table ni de données, dans cet ordre :
 
-1. `server/db/schema.sql`
-2. `server/db/seeds.sql`
-3. `migrations/005_monetization_fedapay.sql`
-4. `migrations/006_pro_selected_features.sql`
-5. `migrations/007_events_ticketing.sql`
+1. `server/db/init.sql`
+2. `server/db/auth-migration.sql`
+3. `server/db/seeds.sql`
+4. `migrations/005_monetization_fedapay.sql`
+5. `migrations/006_pro_selected_features.sql`
+6. `migrations/007_events_ticketing.sql`
 
-Les migrations 006 et 007 dépendent des tables introduites par la migration
-005. Ces instructions concernent une **base neuve**. N'appliquez pas le schéma
-initial sur une base déjà utilisée ; les migrations pour anciens schémas
-doivent être choisies en fonction de leur version.
+Pour une base Neon neuve, exécutez chaque fichier une seule fois dans l'éditeur
+SQL, dans cet ordre. `auth-migration.sql` utilise des opérations idempotentes
+et peut être relancé sans supprimer de données. Les migrations 006 et 007
+dépendent des tables introduites par la migration 005. Ne relancez pas
+`init.sql` sur une base déjà utilisée ; choisissez les migrations adaptées à
+la version de cette base. Le seed est rejouable et active notamment le Burkina
+Faso, la Côte d’Ivoire, le Sénégal et le Mali.
 
 ## 2. Créer le service web Render
 
@@ -89,6 +93,14 @@ leurs vraies valeurs dans Render ; ne les inscrivez pas dans le dépôt.
 | `LIVEKIT_URL` | URL WebSocket LiveKit en `wss://` |
 | `SMS_DELIVERY_URL` | URL HTTPS du relais SMS de production |
 | `SMS_DELIVERY_TOKEN` | Jeton du relais SMS |
+| `EMAIL_PROVIDER` | `resend` pour activer l’adaptateur e-mail |
+| `EMAIL_API_KEY` | Clé API privée Resend |
+| `EMAIL_FROM` | Expéditeur autorisé par Resend, par exemple `QuartierPlus <noreply@votre-domaine>` |
+
+Créez ces trois variables dans **Render → service API → Environment**.
+L’e-mail OTP reste désactivé tant que les trois valeurs ne sont pas présentes
+et que l’expéditeur n’est pas autorisé chez Resend. Le parcours SMS continue de
+fonctionner sans configuration e-mail.
 
 L'application refuse de démarrer en production si un des éléments de la liste
 des variables requises ci-dessus manque. `NODE_ENV` doit être défini sur

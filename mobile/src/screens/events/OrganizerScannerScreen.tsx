@@ -299,7 +299,7 @@ export default function OrganizerScannerScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { backgroundColor: "#f8fafc", flexGrow: 1, padding: 18, paddingTop: 58 },
+  content: { backgroundColor: "#f8fafc", flexGrow: 1, padding: 18, paddingBottom: 112, paddingTop: 58 },
   center: { alignItems: "center", backgroundColor: "#f8fafc", flex: 1, justifyContent: "center" },
   back: { color: "#2563eb", fontSize: 14, fontWeight: "600" },
   title: { color: "#172b4d", fontSize: 25, fontWeight: "800", marginTop: 18 },

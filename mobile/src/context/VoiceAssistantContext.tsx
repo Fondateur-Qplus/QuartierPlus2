@@ -11,6 +11,8 @@ type VoiceAssistantContextValue = {
   registerInput: (insertText: (text: string) => void) => () => void;
   insertIntoFocusedInput: (text: string) => boolean;
   registerDictationHandler: (start: () => void) => () => void;
+  registerAssistantHandler: (start: () => void) => () => void;
+  requestAssistant: () => void;
   requestDictation: () => void;
   recognitionAvailable: boolean | null;
   setRecognitionAvailable: (available: boolean) => void;
@@ -23,6 +25,7 @@ const VoiceAssistantContext =
 export function VoiceAssistantProvider({ children }: PropsWithChildren) {
   const activeInputRef = useRef<((text: string) => void) | null>(null);
   const dictationHandlerRef = useRef<(() => void) | null>(null);
+  const assistantHandlerRef = useRef<(() => void) | null>(null);
   const [recognitionAvailable, setRecognitionAvailable] = useState<
     boolean | null
   >(null);
@@ -58,6 +61,17 @@ export function VoiceAssistantProvider({ children }: PropsWithChildren) {
     dictationHandlerRef.current?.();
   }, []);
 
+  const registerAssistantHandler = useCallback((start: () => void) => {
+    assistantHandlerRef.current = start;
+    return () => {
+      if (assistantHandlerRef.current === start) assistantHandlerRef.current = null;
+    };
+  }, []);
+
+  const requestAssistant = useCallback(() => {
+    assistantHandlerRef.current?.();
+  }, []);
+
   const clearActiveInput = useCallback(() => {
     activeInputRef.current = null;
   }, []);
@@ -68,8 +82,10 @@ export function VoiceAssistantProvider({ children }: PropsWithChildren) {
         clearActiveInput,
         insertIntoFocusedInput,
         recognitionAvailable,
+        registerAssistantHandler,
         registerDictationHandler,
         registerInput,
+        requestAssistant,
         requestDictation,
         setRecognitionAvailable,
       }}

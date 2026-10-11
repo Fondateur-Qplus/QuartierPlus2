@@ -562,7 +562,7 @@ const styles = StyleSheet.create({
   roomSubtitle: { color: "#64748b", fontSize: 12, marginTop: 4 },
   seatCount: { alignItems: "center", backgroundColor: "#f3e8ff", borderRadius: 14, flexDirection: "row", gap: 5, paddingHorizontal: 9, paddingVertical: 6 },
   seatCountText: { color: "#6d28d9", fontSize: 12, fontWeight: "700" },
-  content: { flexGrow: 1, paddingBottom: 20, paddingTop: 18 },
+  content: { flexGrow: 1, paddingBottom: 112, paddingTop: 18 },
   compactContent: { paddingTop: 10 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "center" },
   chair: { backgroundColor: "#1e1b4b", borderColor: "#e2e8f0", borderRadius: 14, borderWidth: 2, height: 166, overflow: "hidden", width: "48%" },

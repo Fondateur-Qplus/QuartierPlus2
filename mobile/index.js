@@ -76,10 +76,15 @@ if (firebaseStartupError) {
 }
 
 const StartupRoot = require("./src/startup/StartupRoot").default;
+const { SafeAreaProvider } = require("react-native-safe-area-context");
 registerRootComponent(() =>
-  React.createElement(StartupRoot, {
-    crashlyticsClient,
-    firebaseStartupError,
-    crashlyticsStartupPromise,
-  }),
+  React.createElement(
+    SafeAreaProvider,
+    null,
+    React.createElement(StartupRoot, {
+      crashlyticsClient,
+      firebaseStartupError,
+      crashlyticsStartupPromise,
+    }),
+  ),
 );

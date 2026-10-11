@@ -1525,7 +1525,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   conversationList: {
-    paddingBottom: 24,
+    paddingBottom: 112,
     paddingHorizontal: 20,
     paddingTop: 5,
   },
@@ -1670,7 +1670,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     gap: 9,
     justifyContent: "flex-end",
-    paddingBottom: 95,
+    paddingBottom: 112,
     paddingHorizontal: 20,
     paddingTop: 14,
   },

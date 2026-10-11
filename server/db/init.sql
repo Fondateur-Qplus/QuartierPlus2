@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS country_config (
     police_number VARCHAR(20) NOT NULL,
     firefighters_number VARCHAR(20) NOT NULL,
     ambulance_number VARCHAR(20) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS otp_verifications (
     code_hash VARCHAR(64) NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
     attempts INT NOT NULL DEFAULT 0,
+    channel VARCHAR(10) NOT NULL DEFAULT 'sms' CHECK (channel IN ('sms', 'email')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     registration_data JSONB
 );

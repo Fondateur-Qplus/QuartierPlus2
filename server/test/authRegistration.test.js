@@ -58,6 +58,7 @@ test("registration OTP stores the validated details and creates the account afte
             .update(`${phoneNumber}:123456`)
             .digest("hex"),
           attempts: 0,
+          channel: "sms",
           registration_data: registration,
         }],
       };
@@ -117,6 +118,7 @@ test("registration OTP stores the validated details and creates the account afte
   );
   assert.ok(otpInsert);
   assert.match(otpInsert.statement, /registration_data/);
+  assert.equal(otpInsert.values[3], "sms");
   assert.deepEqual(JSON.parse(otpInsert.values[2]), registration);
 
   const verifyResponse = createResponse();
@@ -137,6 +139,8 @@ test("registration OTP stores the validated details and creates the account afte
   );
   assert.ok(userInsert);
   assert.match(userInsert.statement, /terms_accepted_at/);
+  assert.match(userInsert.statement, /CASE WHEN \$7 = 'sms' THEN NOW\(\)/);
+  assert.match(userInsert.statement, /CASE WHEN \$7 = 'email' THEN NOW\(\)/);
   assert.deepEqual(userInsert.values, [
     phoneNumber,
     registration.email,
@@ -144,6 +148,7 @@ test("registration OTP stores the validated details and creates the account afte
     registration.first_name,
     registration.last_name,
     registration.country_code,
+    "sms",
   ]);
 });
 
@@ -179,10 +184,15 @@ test("email login sends and verifies the OTP against the account phone", async (
     country_code: "BF",
     is_verified: true,
   };
-  const client = createClient(async (statement) => {
+  const verificationCalls = [];
+  const client = createClient(async (statement, values = []) => {
+    verificationCalls.push({ statement, values });
     if (statement.includes("SELECT 1")) return { rowCount: 0, rows: [] };
     if (statement.includes("SELECT phone_number FROM users")) {
       return { rowCount: 1, rows: [{ phone_number: phoneNumber }] };
+    }
+    if (statement.includes("SELECT phone_number FROM otp_verifications")) {
+      return { rowCount: 0, rows: [] };
     }
     if (statement.includes("SELECT code_hash")) {
       return {
@@ -192,6 +202,7 @@ test("email login sends and verifies the OTP against the account phone", async (
             .update(`${phoneNumber}:123456`)
             .digest("hex"),
           attempts: 0,
+          channel: "email",
           registration_data: null,
         }],
       };
@@ -211,7 +222,7 @@ test("email login sends and verifies the OTP against the account phone", async (
 
   const requestResponse = createResponse();
   await requestOtp(
-    { body: { flow: "login", identifier: email } },
+    { body: { flow: "login", identifier: email, channel: "email" } },
     requestResponse,
     (error) => {
       throw error;
@@ -222,7 +233,7 @@ test("email login sends and verifies the OTP against the account phone", async (
 
   const verifyResponse = createResponse();
   await verifyOtp(
-    { body: { identifier: email, code: "123456" } },
+    { body: { identifier: email, code: "123456", channel: "email" } },
     verifyResponse,
     (error) => {
       throw error;
@@ -231,4 +242,79 @@ test("email login sends and verifies the OTP against the account phone", async (
   assert.equal(verifyResponse.statusCode, 200);
   assert.equal(verifyResponse.payload.user.phone_number, phoneNumber);
   assert.equal(verifyResponse.payload.user.email, email);
+  const verificationUpdate = verificationCalls.find(({ statement }) =>
+    statement.includes("UPDATE users"),
+  );
+  assert.ok(verificationUpdate);
+  assert.match(verificationUpdate.statement, /email_verified_at = CASE WHEN \$3 = 'email'/);
+  assert.equal(verificationUpdate.values[2], "email");
+});
+
+test("an OTP issued for email cannot be verified as SMS", async (context) => {
+  let userUpdateAttempted = false;
+  const client = createClient(async (statement) => {
+    if (statement.includes("SELECT code_hash")) {
+      return {
+        rowCount: 1,
+        rows: [{
+          code_hash: createHmac("sha256", jwtSecret)
+            .update(`${phoneNumber}:123456`)
+            .digest("hex"),
+          attempts: 0,
+          channel: "email",
+          registration_data: null,
+        }],
+      };
+    }
+    if (statement.includes("UPDATE users")) userUpdateAttempted = true;
+    return { rowCount: 1, rows: [] };
+  });
+  context.mock.method(pool, "connect", async () => client);
+
+  const response = createResponse();
+  await verifyOtp(
+    { body: { identifier: phoneNumber, code: "123456", channel: "sms" } },
+    response,
+    (error) => {
+      throw error;
+    },
+  );
+
+  assert.equal(response.statusCode, 401);
+  assert.equal(userUpdateAttempted, false);
+});
+
+test("email OTP explains that SMS should be chosen until a provider is configured", async (context) => {
+  const unlistedPhone = "+22656119567";
+  let connectCalled = false;
+  context.mock.method(pool, "query", async () => ({
+    rowCount: 1,
+    rows: [{ phone_number: unlistedPhone, email: "awa@example.com" }],
+  }));
+  context.mock.method(pool, "connect", async () => {
+    connectCalled = true;
+    throw new Error("OTP must not be stored when email is not configured.");
+  });
+
+  const response = createResponse();
+  await requestOtp(
+    {
+      body: {
+        flow: "login",
+        identifier: unlistedPhone,
+        channel: "email",
+      },
+    },
+    response,
+    (error) => {
+      throw error;
+    },
+  );
+
+  assert.equal(response.statusCode, 503);
+  assert.equal(
+    response.payload.error,
+    "L'envoi par e-mail n'est pas encore configuré, choisissez SMS.",
+  );
+  assert.equal(connectCalled, false);
 });

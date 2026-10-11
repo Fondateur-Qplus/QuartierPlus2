@@ -188,7 +188,7 @@ export type ApiFetchResponse = {
 
 export const apiFetch = async (
   input: string,
-  init: RequestInit = {},
+  init: RequestInit & { timeoutMs?: number } = {},
 ): Promise<ApiFetchResponse> => {
   const method = (init.method ?? "GET").toUpperCase();
   const headers = new Headers(init.headers);
@@ -208,6 +208,7 @@ export const apiFetch = async (
     const response = await api.request({
       url: input,
       method,
+      ...(init.timeoutMs ? { timeout: init.timeoutMs } : {}),
       headers: Object.fromEntries(headers.entries()),
       data: body,
       signal: init.signal ?? undefined,

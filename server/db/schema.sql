@@ -8,6 +8,7 @@ CREATE TABLE country_config (
     police_number VARCHAR(20) NOT NULL,
     firefighters_number VARCHAR(20) NOT NULL,
     ambulance_number VARCHAR(20) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -22,6 +23,8 @@ CREATE TABLE users (
     country_code VARCHAR(3) REFERENCES country_config(code),
     reputation_score INT DEFAULT 100,
     is_verified BOOLEAN DEFAULT FALSE,
+    phone_verified_at TIMESTAMPTZ,
+    email_verified_at TIMESTAMPTZ,
     last_location GEOMETRY(Point, 4326),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -31,6 +34,7 @@ CREATE TABLE otp_verifications (
     code_hash VARCHAR(64) NOT NULL,
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
     attempts INT NOT NULL DEFAULT 0,
+    channel VARCHAR(10) NOT NULL DEFAULT 'sms' CHECK (channel IN ('sms', 'email')),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -16,53 +16,18 @@ import {
 import { useAuth, type AuthUser } from "../../context/AuthContext";
 import api from "../../services/api";
 import GoogleAuthScreen from "./GoogleAuthScreen";
-import { formatPhoneNumberE164 } from "./phoneNumber";
+import {
+  EMBEDDED_PHONE_COUNTRIES,
+  formatPhoneNumberE164,
+  parseInternationalPhone,
+  type PhoneCountry,
+} from "./phoneNumber";
 import type { RootStackParamList } from "../../navigation/types";
-
-type PhoneCountry = {
-  code: string;
-  name: string;
-  prefix: string;
-};
 
 type AuthMode = "login" | "register";
 
-const FALLBACK_COUNTRIES: PhoneCountry[] = [
-  { code: "BF", name: "Burkina Faso", prefix: "+226" },
-  { code: "CI", name: "Côte d'Ivoire", prefix: "+225" },
-  { code: "SN", name: "Sénégal", prefix: "+221" },
-  { code: "ML", name: "Mali", prefix: "+223" },
-];
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-
-const parsePhoneCountries = (value: unknown): PhoneCountry[] => {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error("La liste des pays renvoyée par l'API est invalide.");
-  }
-  const countries = value.map((item): PhoneCountry => {
-    if (
-      !isRecord(item) ||
-      typeof item.code !== "string" ||
-      !/^[A-Z]{2,3}$/.test(item.code) ||
-      typeof item.name !== "string" ||
-      !item.name.trim() ||
-      typeof item.phone_prefix !== "string" ||
-      !/^\+[1-9]\d{0,3}$/.test(item.phone_prefix)
-    ) {
-      throw new Error("La liste des pays renvoyée par l'API est invalide.");
-    }
-    return { code: item.code, name: item.name, prefix: item.phone_prefix };
-  });
-  if (new Set(countries.map((country) => country.code)).size !== countries.length) {
-    throw new Error("La liste des pays renvoyée par l'API contient des doublons.");
-  }
-  return countries;
-};
-
-const normalizeCountrySearch = (value: string) =>
-  value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
 
 const AUTH_WAKE_TIMEOUT_MS = 60_000;
 const AUTH_RETRY_TIMEOUT_MS = 15_000;
@@ -127,68 +92,30 @@ export default function PhoneAuthScreen() {
   const route = useRoute<RouteProp<RootStackParamList, "PhoneAuth">>();
   const { setSession, user } = useAuth();
   const [mode, setMode] = useState<AuthMode>(route.params?.mode ?? "login");
-  const [countries, setCountries] = useState(FALLBACK_COUNTRIES);
-  const [selectedCountry, setSelectedCountry] = useState(FALLBACK_COUNTRIES[0]);
-  const [countrySearch, setCountrySearch] = useState("");
-  const [countryListError, setCountryListError] = useState<string | null>(null);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
+  const [manualCountryCode, setManualCountryCode] = useState<string | undefined>();
   const [email, setEmail] = useState("");
   const [identifier, setIdentifier] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [otp, setOtp] = useState("");
+  const [otpChannel, setOtpChannel] = useState<"sms" | "email">("sms");
+  const [otpIdentifier, setOtpIdentifier] = useState("");
   const [otpRequested, setOtpRequested] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offerRegistration, setOfferRegistration] = useState(false);
 
-  const visibleCountries = useMemo(() => {
-    const query = normalizeCountrySearch(countrySearch.trim());
-    if (query) {
-      return countries
-        .filter((country) =>
-          normalizeCountrySearch(`${country.name} ${country.code} ${country.prefix}`).includes(query),
-        )
-        .slice(0, 24);
-    }
-    const preferredCodes = [selectedCountry.code, "BF", "CI", "SN", "ML"];
-    return preferredCodes
-      .map((code) => countries.find((country) => country.code === code))
-      .filter((country): country is PhoneCountry => Boolean(country))
-      .filter(
-        (country, index, all) =>
-          all.findIndex((candidate) => candidate.code === country.code) === index,
-      );
-  }, [countries, countrySearch, selectedCountry.code]);
-
-  useEffect(() => {
-    let mounted = true;
-    void api
-      .get<{ countries?: unknown }>("/api/v1/auth/countries")
-      .then((response) => {
-        const loadedCountries = parsePhoneCountries(response.data.countries);
-        if (!mounted) return;
-        setCountries(loadedCountries);
-        setSelectedCountry(
-          (current) =>
-            loadedCountries.find((country) => country.code === current.code) ??
-            loadedCountries[0],
-        );
-        setCountryListError(null);
-      })
-      .catch(() => {
-        if (mounted) {
-          setCountryListError(
-            "La liste des pays est indisponible; les quatre pays principaux restent proposés.",
-          );
-        }
-      });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  const detectedPhone = useMemo(
+    () => parseInternationalPhone(phone, manualCountryCode),
+    [manualCountryCode, phone],
+  );
+  const ambiguousCountries = detectedPhone?.possibleCountries ?? [];
+  const manuallySelectedCountry = EMBEDDED_PHONE_COUNTRIES.find(
+    (country) => country.code === manualCountryCode,
+  );
 
   useEffect(() => {
     if (!user) return;
@@ -212,13 +139,13 @@ export default function PhoneAuthScreen() {
   }, [secondsRemaining]);
 
   const fullPhoneNumber = () => {
-    return formatPhoneNumberE164(phone, selectedCountry.prefix);
+    return formatPhoneNumberE164(phone, manualCountryCode);
   };
 
   const normalizedIdentifier = () => {
     const value = identifier.trim();
     if (value.includes("@")) return value.toLowerCase();
-    return `+${value.replace(/\D/g, "")}`;
+    return formatPhoneNumberE164(value, manualCountryCode);
   };
 
   const switchMode = (nextMode: AuthMode) => {
@@ -251,24 +178,29 @@ export default function PhoneAuthScreen() {
         if (!termsAccepted) {
           throw new Error("Vous devez accepter les conditions et la politique de confidentialité.");
         }
+        const phoneNumber = fullPhoneNumber();
+        const countryCode =
+          parseInternationalPhone(phoneNumber, manualCountryCode)?.country?.code ??
+          manualCountryCode;
+        if (!countryCode) {
+          throw new Error("Choisissez le pays correspondant à cet indicatif partagé.");
+        }
         payload = {
           flow: "register",
           first_name: firstName.trim(),
           last_name: lastName.trim(),
-          country_code: selectedCountry.code,
-          phone_number: fullPhoneNumber(),
+          country_code: countryCode,
+          phone_number: phoneNumber,
           email: email.trim().toLowerCase(),
           terms_accepted: true,
+          channel: otpChannel,
         };
       } else {
         const normalized = normalizedIdentifier();
-        if (
-          !/^\+[1-9]\d{7,14}$/.test(normalized) &&
-          !isValidEmail(normalized)
-        ) {
+        if (!normalized.startsWith("+") && !isValidEmail(normalized)) {
           throw new Error("Saisissez un téléphone avec indicatif (+226…) ou une adresse e-mail valide.");
         }
-        payload = { flow: "login", identifier: normalized };
+        payload = { flow: "login", identifier: normalized, channel: otpChannel };
       }
     } catch (validationError) {
       setError(responseError(validationError, "Vérifiez les informations saisies."));
@@ -277,9 +209,17 @@ export default function PhoneAuthScreen() {
 
     setIsLoading(true);
     try {
-      await requestWhileServerWakes("/api/v1/auth/request-otp", payload);
+      const response = await requestWhileServerWakes<{
+        challenge_identifier?: string;
+      }>(
+        `/api/v1/auth/request-otp?channel=${otpChannel}`,
+        payload,
+      );
       setOtpRequested(true);
       setOtp("");
+      const inputIdentifier =
+        mode === "register" ? fullPhoneNumber() : normalizedIdentifier();
+      setOtpIdentifier(response.data.challenge_identifier ?? inputIdentifier);
       setSecondsRemaining(60);
     } catch (requestError) {
       const message = responseError(requestError, "Impossible d'envoyer le code de vérification.");
@@ -296,14 +236,13 @@ export default function PhoneAuthScreen() {
     setError(null);
     setIsLoading(true);
     try {
-      const challengeIdentifier =
-        mode === "register" ? fullPhoneNumber() : normalizedIdentifier();
       const response = await requestWhileServerWakes<{
         token?: unknown;
         user?: unknown;
       }>("/api/v1/auth/verify-otp", {
-        identifier: challengeIdentifier,
+        identifier: otpIdentifier,
         code: otp,
+        channel: otpChannel,
       });
       const data = response.data;
       const user = data.user as AuthUser | undefined;
@@ -387,66 +326,53 @@ export default function PhoneAuthScreen() {
               value={lastName}
             />
 
-            <Text style={styles.label}>Pays avec indicatif</Text>
+            <Text style={styles.label}>Téléphone avec indicatif</Text>
             <TextInput
-              accessibilityLabel="Rechercher un pays"
-              autoCapitalize="none"
-              onChangeText={setCountrySearch}
-              placeholder="Rechercher par pays ou indicatif"
+              accessibilityLabel="Téléphone avec indicatif"
+              autoComplete="tel"
+              keyboardType="phone-pad"
+              onChangeText={(value) => {
+                setPhone(value);
+                setManualCountryCode(undefined);
+              }}
+              placeholder="+226 56 11 95 67 ou 0022656119567"
               placeholderTextColor="#94a3b8"
-              style={styles.countrySearch}
-              value={countrySearch}
+              style={styles.textInput}
+              value={phone}
             />
-            {countryListError && (
-              <Text accessibilityRole="alert" style={styles.countryListError}>
-                {countryListError}
-              </Text>
-            )}
-            <View style={styles.countryList}>
-              {visibleCountries.map((country) => {
-                const selected = selectedCountry.code === country.code;
-                return (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    key={country.code}
-                    onPress={() => {
-                      setSelectedCountry(country);
-                      setCountrySearch("");
-                    }}
-                    style={[styles.countryOption, selected && styles.countryOptionSelected]}
-                  >
-                    <Text
-                      style={[
-                        styles.countryOptionText,
-                        selected && styles.countryOptionTextSelected,
-                      ]}
-                    >
-                      {country.name} {country.prefix}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Text style={styles.label}>Téléphone</Text>
-            <View style={styles.phoneInput}>
-              <Text style={styles.prefix}>{selectedCountry.prefix}</Text>
-              <TextInput
-                accessibilityLabel="Numéro de téléphone"
-                autoComplete="tel-national"
-                keyboardType="phone-pad"
-                maxLength={15}
-                onChangeText={setPhone}
-                placeholder="Votre numéro"
-                placeholderTextColor="#94a3b8"
-                style={styles.phoneTextInput}
-                value={phone}
-              />
-            </View>
             <Text style={styles.helper}>
-              Le numéro sera enregistré au format international E.164.
+              {phone.trim() && !phone.trim().startsWith("+") && !phone.trim().startsWith("00")
+                ? "Saisissez l’indicatif, par exemple +226…"
+                : detectedPhone?.country || manuallySelectedCountry
+                  ? `${detectedPhone?.country?.name ?? manuallySelectedCountry?.name} détecté · ${detectedPhone?.e164 ?? fullPhoneNumber()}`
+                  : "Saisissez le numéro complet, avec son indicatif international."}
             </Text>
+            {!detectedPhone?.country && ambiguousCountries.length > 1 && (
+              <View style={styles.countryList}>
+                {ambiguousCountries.map((country: PhoneCountry) => {
+                  const selected = manualCountryCode === country.code;
+                  return (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      key={country.code}
+                      onPress={() => setManualCountryCode(country.code)}
+                      style={[styles.countryOption, selected && styles.countryOptionSelected]}
+                    >
+                      <Text
+                        style={[
+                          styles.countryOptionText,
+                          selected && styles.countryOptionTextSelected,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {country.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
 
             <Text style={styles.label}>E-mail</Text>
             <TextInput
@@ -460,6 +386,25 @@ export default function PhoneAuthScreen() {
               style={styles.textInput}
               value={email}
             />
+            <Text style={styles.label}>Recevoir le code par</Text>
+            <View style={styles.modeSwitch}>
+              {(["sms", "email"] as const).map((channel) => (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: otpChannel === channel }}
+                  key={channel}
+                  onPress={() => setOtpChannel(channel)}
+                  style={[styles.modeButton, otpChannel === channel && styles.modeButtonSelected]}
+                >
+                  <Text
+                    style={[styles.modeText, otpChannel === channel && styles.modeTextSelected]}
+                    numberOfLines={1}
+                  >
+                    {channel === "sms" ? "SMS" : "E-mail"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
 
             <Pressable
               accessibilityRole="checkbox"
@@ -485,6 +430,8 @@ export default function PhoneAuthScreen() {
               keyboardType="email-address"
               onChangeText={(value) => {
                 setIdentifier(value);
+                setPhone(value);
+                setManualCountryCode(undefined);
                 setOfferRegistration(false);
               }}
               placeholder="+226 70 00 00 00 ou vous@exemple.com"
@@ -492,6 +439,65 @@ export default function PhoneAuthScreen() {
               style={styles.textInput}
               value={identifier}
             />
+            {identifier.trim() && !identifier.includes("@") && (
+              <Text style={styles.helper}>
+                {detectedPhone?.country || manuallySelectedCountry
+                  ? `${detectedPhone?.country?.name ?? manuallySelectedCountry?.name} détecté · ${detectedPhone?.e164 ?? fullPhoneNumber()}`
+                  : !identifier.trim().startsWith("+") && !identifier.trim().startsWith("00")
+                    ? "Saisissez l’indicatif, par exemple +226…"
+                    : "Saisissez un numéro international valide."}
+              </Text>
+            )}
+            {!identifier.includes("@") && !detectedPhone?.country && ambiguousCountries.length > 1 && (
+              <View style={styles.countryList}>
+                {ambiguousCountries.map((country) => (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: manualCountryCode === country.code }}
+                    key={country.code}
+                    onPress={() => setManualCountryCode(country.code)}
+                    style={[
+                      styles.countryOption,
+                      manualCountryCode === country.code && styles.countryOptionSelected,
+                    ]}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.countryOptionText,
+                        manualCountryCode === country.code && styles.countryOptionTextSelected,
+                      ]}
+                    >
+                      {country.name}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </>
+        )}
+
+        {mode === "login" && !otpRequested && (
+          <>
+            <Text style={styles.label}>Recevoir le code par</Text>
+            <View style={styles.modeSwitch}>
+              {(["sms", "email"] as const).map((channel) => (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: otpChannel === channel }}
+                  key={channel}
+                  onPress={() => setOtpChannel(channel)}
+                  style={[styles.modeButton, otpChannel === channel && styles.modeButtonSelected]}
+                >
+                  <Text
+                    style={[styles.modeText, otpChannel === channel && styles.modeTextSelected]}
+                    numberOfLines={1}
+                  >
+                    {channel === "sms" ? "SMS" : "E-mail"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
           </>
         )}
 
@@ -499,7 +505,7 @@ export default function PhoneAuthScreen() {
           <>
             <Text style={styles.label}>Code de vérification</Text>
             <Text style={styles.helper}>
-              Un code à six chiffres a été envoyé par SMS au numéro associé à votre compte.
+              Un code à six chiffres a été envoyé par {otpChannel === "sms" ? "SMS" : "e-mail"}.
             </Text>
             <TextInput
               accessibilityLabel="Code OTP à six chiffres"
@@ -564,18 +570,10 @@ export default function PhoneAuthScreen() {
           <Pressable
             accessibilityRole="button"
             onPress={() => {
-              if (identifier.includes("@")) setEmail(identifier.trim());
-              else if (identifier.trim().startsWith("+")) {
-                const matched = countries.find((country) =>
-                  identifier.trim().startsWith(country.prefix),
-                );
-                if (matched) {
-                  setSelectedCountry(matched);
-                  setPhone(identifier.trim().slice(matched.prefix.length));
-                }
-              }
-              switchMode("register");
-            }}
+                if (identifier.includes("@")) setEmail(identifier.trim());
+              else setPhone(identifier.trim());
+                switchMode("register");
+              }}
             style={styles.registerOffer}
           >
             <Text style={styles.registerOfferText}>Créer un compte</Text>
@@ -620,8 +618,6 @@ const styles = StyleSheet.create({
   modeTextSelected: { color: "#1d4ed8" },
   label: { color: "#334155", fontSize: 14, fontWeight: "600", marginBottom: 8, marginTop: 14 },
   textInput: { backgroundColor: "#ffffff", borderColor: "#cbd5e1", borderRadius: 12, borderWidth: 1, color: "#0f172a", fontSize: 16, minHeight: 52, paddingHorizontal: 14 },
-  countrySearch: { backgroundColor: "#ffffff", borderColor: "#cbd5e1", borderRadius: 10, borderWidth: 1, color: "#0f172a", fontSize: 14, marginBottom: 8, minHeight: 44, paddingHorizontal: 12 },
-  countryListError: { color: "#92400e", fontSize: 12, lineHeight: 18, marginBottom: 8 },
   countryList: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   countryOption: { backgroundColor: "#ffffff", borderColor: "#cbd5e1", borderRadius: 18, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8 },
   countryOptionSelected: { backgroundColor: "#eff6ff", borderColor: "#2563eb" },

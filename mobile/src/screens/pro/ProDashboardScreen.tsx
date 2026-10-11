@@ -958,7 +958,7 @@ function TabButton({
 }
 
 const styles = StyleSheet.create({
-  content: { backgroundColor: "#f8fafc", flexGrow: 1, padding: 20, paddingTop: 60 },
+  content: { backgroundColor: "#f8fafc", flexGrow: 1, padding: 20, paddingBottom: 112, paddingTop: 60 },
   title: { color: "#172b4d", fontSize: 24, fontWeight: "800" },
   expiry: { color: "#64748b", fontSize: 12, marginBottom: 20, marginTop: 6 },
   card: {

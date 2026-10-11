@@ -30,6 +30,28 @@ type FeedEntry = {
   price?: string;
 };
 
+type FeedError = {
+  message: string;
+  details: string;
+};
+
+class FeedHttpError extends Error {
+  constructor(
+    readonly path: string,
+    readonly status: number,
+  ) {
+    super(
+      status === 401
+        ? "Votre session a expiré. Reconnectez-vous puis réessayez."
+        : status === 404
+          ? "La ressource du fil est introuvable. Réessayez dans un instant."
+          : status >= 500
+            ? "Le serveur rencontre une erreur. Réessayez dans un instant."
+            : `Le chargement a échoué (HTTP ${status}). Réessayez.`,
+    );
+  }
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -116,7 +138,9 @@ export default function FeedScreen() {
   const [entries, setEntries] = useState<FeedEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<FeedError | null>(null);
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
+  const [isServerRequestPending, setIsServerRequestPending] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const loadCachedFeed = useCallback(async () => {
@@ -139,18 +163,26 @@ export default function FeedScreen() {
     const controller = new AbortController();
     const loadFeed = async () => {
       setError(null);
+      setShowTechnicalDetails(false);
+      setIsServerRequestPending(false);
       try {
         if (authStatus === "guest") {
           if (!API_BASE_URL || isOffline) {
             setEntries([]);
-            setError("Les annonces publiques seront disponibles dès que la connexion sera rétablie.");
+            setError({
+              message: "Les annonces publiques seront disponibles dès que la connexion sera rétablie.",
+              details: "Mode invité hors ligne ou URL API absente.",
+            });
             return;
           }
+          setIsServerRequestPending(true);
           const response = await apiFetch(`${API_BASE_URL}/v1/public/marketplace`, {
             signal: controller.signal,
+            timeoutMs: 60_000,
           });
+          if (!cancelled) setIsServerRequestPending(false);
           if (!response.ok) {
-            throw new Error("Le serveur se réveille. Les annonces seront disponibles dans un instant.");
+            throw new FeedHttpError("/v1/public/marketplace", response.status);
           }
           const payload: unknown = await response.json();
           const rawPosts = recordsFrom(payload, "items");
@@ -166,11 +198,12 @@ export default function FeedScreen() {
         const cachedCount = await loadCachedFeed();
         if (isOffline) {
           if (!cancelled) {
-            setError(
-              cachedCount > 0
+            setError({
+              message: cachedCount > 0
                 ? "Mode hors ligne : affichage des données enregistrées sur cet appareil."
                 : "Mode hors ligne : aucune publication ou alerte n'a encore été mise en cache.",
-            );
+              details: "NetInfo signale une absence de connexion Internet.",
+            });
           }
           return;
         }
@@ -188,21 +221,29 @@ export default function FeedScreen() {
           radius_m: "30000",
         });
 
+        setIsServerRequestPending(true);
         const [postsResponse, alertsResponse] = await Promise.all([
           apiFetch(
-            `${API_BASE_URL}/v1/marketplace/items?${query.toString()}`,
-            { signal: controller.signal },
+            `${API_BASE_URL}/v1/public/marketplace?${query.toString()}`,
+            { signal: controller.signal, timeoutMs: 60_000 },
           ),
           apiFetch(
             `${API_BASE_URL}/v1/sos/alerts?${query.toString()}`,
-            { signal: controller.signal },
+            { signal: controller.signal, timeoutMs: 60_000 },
           ),
         ]);
+        if (!cancelled) setIsServerRequestPending(false);
         if (!postsResponse.ok) {
-          throw new Error(`Chargement des publications refusé (HTTP ${postsResponse.status}).`);
+          throw new FeedHttpError(
+            "/v1/public/marketplace",
+            postsResponse.status,
+          );
         }
         if (!alertsResponse.ok) {
-          throw new Error(`Chargement des alertes refusé (HTTP ${alertsResponse.status}).`);
+          throw new FeedHttpError(
+            "/v1/sos/alerts",
+            alertsResponse.status,
+          );
         }
 
         const [postsPayload, alertsPayload] = await Promise.all([
@@ -223,11 +264,18 @@ export default function FeedScreen() {
         if (cancelled || controller.signal.aborted) return;
         if (authStatus === "guest") {
           setEntries([]);
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : "Les annonces publiques sont temporairement indisponibles.",
-          );
+          setError({
+            message:
+              loadError instanceof Error
+                ? loadError.message
+                : "Les annonces publiques sont temporairement indisponibles.",
+            details:
+              loadError instanceof FeedHttpError
+                ? `${loadError.path} — HTTP ${loadError.status}`
+                : loadError instanceof Error
+                  ? loadError.message
+                  : "Erreur réseau inconnue.",
+          });
           return;
         }
         let cachedCount = 0;
@@ -236,17 +284,25 @@ export default function FeedScreen() {
         } catch (cacheError) {
           console.error("Unable to read the local neighborhood feed:", cacheError);
         }
-        setError(
-          cachedCount > 0
-            ? "Connexion indisponible : affichage du fil enregistré sur cet appareil."
-            : loadError instanceof Error
-              ? loadError.message
-              : "Impossible de charger le fil du quartier.",
-        );
+        setError({
+          message:
+            cachedCount > 0
+              ? "Connexion indisponible : affichage du fil enregistré sur cet appareil."
+              : loadError instanceof Error
+                ? loadError.message
+                : "Impossible de charger le fil du quartier.",
+          details:
+            loadError instanceof FeedHttpError
+              ? `${loadError.path} — HTTP ${loadError.status}`
+              : loadError instanceof Error
+                ? loadError.message
+                : "Erreur réseau inconnue.",
+        });
       } finally {
         if (!cancelled) {
           setIsLoading(false);
           setIsRefreshing(false);
+          setIsServerRequestPending(false);
         }
       }
     };
@@ -283,13 +339,34 @@ export default function FeedScreen() {
       </View>
       {error && (
         <View style={[styles.notice, entries.length ? styles.cachedNotice : styles.errorNotice]}>
-          <Text style={styles.noticeText}>{error}</Text>
+          <Text style={styles.noticeText}>{error.message}</Text>
+          <Pressable accessibilityRole="button" onPress={refresh}>
+            <Text style={styles.retryText}>Réessayer</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showTechnicalDetails }}
+            onPress={() => setShowTechnicalDetails((shown) => !shown)}
+          >
+            <Text style={styles.detailsToggle}>
+              {showTechnicalDetails ? "Masquer les détails" : "Détails techniques"}
+            </Text>
+          </Pressable>
+          {showTechnicalDetails && (
+            <Text selectable style={styles.technicalDetails}>
+              {error.details}
+            </Text>
+          )}
         </View>
       )}
       {isLoading && entries.length === 0 ? (
         <View style={styles.loading}>
           <ActivityIndicator color="#2563eb" size="large" />
-          <Text style={styles.loadingText}>Chargement du fil local...</Text>
+          <Text style={styles.loadingText}>
+            {isServerRequestPending
+              ? "Le serveur se réveille…"
+              : "Chargement du fil local…"}
+          </Text>
         </View>
       ) : (
         <ScrollView
@@ -362,11 +439,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 40,
   },
-  notice: { marginHorizontal: 14, marginTop: 10, padding: 11, borderRadius: 10 },
+  notice: { marginHorizontal: 14, marginTop: 10, padding: 11, borderRadius: 10, gap: 8 },
   cachedNotice: { backgroundColor: "#eff6ff" },
   errorNotice: { backgroundColor: "#fef2f2" },
   noticeText: { color: "#334155", fontSize: 12, lineHeight: 18 },
-  list: { gap: 12, padding: 14, paddingBottom: 24 },
+  retryText: { color: "#1d4ed8", fontSize: 13, fontWeight: "700" },
+  detailsToggle: { color: "#475569", fontSize: 12, textDecorationLine: "underline" },
+  technicalDetails: { color: "#64748b", fontSize: 11, lineHeight: 16 },
+  list: { gap: 12, padding: 14, paddingBottom: 112 },
   card: {
     backgroundColor: "#ffffff",
     borderColor: "#e2e8f0",

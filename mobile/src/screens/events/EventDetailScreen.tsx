@@ -186,7 +186,7 @@ export default function EventDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { backgroundColor: "#f8fafc", flexGrow: 1, padding: 20, paddingTop: 58 },
+  content: { backgroundColor: "#f8fafc", flexGrow: 1, padding: 20, paddingBottom: 112, paddingTop: 58 },
   center: { alignItems: "center", backgroundColor: "#f8fafc", flex: 1, justifyContent: "center", padding: 24 },
   title: { color: "#172b4d", fontSize: 26, fontWeight: "800", marginTop: 24 },
   date: { color: "#64748b", fontSize: 14, marginTop: 8 },

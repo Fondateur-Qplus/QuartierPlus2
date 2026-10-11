@@ -5,19 +5,25 @@ import {
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useEffect, useState } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   Home,
   MapPin,
+  Mic,
   MessageSquare,
-  Radio,
   ShoppingBag,
-  BriefcaseBusiness,
-  CalendarDays,
   User,
-  Users,
 } from "lucide-react-native";
 import { StatusBar } from "expo-status-bar";
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Keyboard,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import * as SecureStore from "expo-secure-store";
 import VoiceAssistantModal from "./src/components/VoiceAssistantModal";
 import { AuthProvider, useAuth } from "./src/context/AuthContext";
@@ -51,6 +57,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 function MainTabs() {
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       screenOptions={{
@@ -60,13 +67,14 @@ function MainTabs() {
         tabBarStyle: {
           backgroundColor: "#ffffff",
           borderTopColor: "#e2e8f0",
-          height: 64,
-          paddingBottom: 8,
-          paddingTop: 8,
+          height: 56 + insets.bottom,
+          paddingBottom: Math.max(insets.bottom, 4),
+          paddingTop: 6,
         },
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: "500",
+          includeFontPadding: false,
         },
       }}
     >
@@ -82,7 +90,7 @@ function MainTabs() {
         name="CarteSOS"
         component={MapScreen}
         options={{
-          tabBarLabel: "Carte SOS",
+          tabBarLabel: "Carte",
           tabBarIcon: ({ color, size }) => <MapPin color={color} size={size} />,
         }}
       />
@@ -105,22 +113,6 @@ function MainTabs() {
         }}
       />
       <Tab.Screen
-        name="Talkie"
-        component={WalkieTalkieScreen}
-        options={{
-          tabBarLabel: "Talkie",
-          tabBarIcon: ({ color, size }) => <Radio color={color} size={size} />,
-        }}
-      />
-      <Tab.Screen
-        name="Grin"
-        component={GrinScreen}
-        options={{
-          tabBarLabel: "Grin",
-          tabBarIcon: ({ color, size }) => <Users color={color} size={size} />,
-        }}
-      />
-      <Tab.Screen
         name="Profil"
         component={SettingsScreen}
         options={{
@@ -129,24 +121,24 @@ function MainTabs() {
         }}
       />
       <Tab.Screen
+        name="Talkie"
+        component={WalkieTalkieScreen}
+        options={{ tabBarButton: () => null }}
+      />
+      <Tab.Screen
+        name="Grin"
+        component={GrinScreen}
+        options={{ tabBarButton: () => null }}
+      />
+      <Tab.Screen
         name="EspacePro"
         component={ProTabNavigator}
-        options={{
-          tabBarLabel: "Pro",
-          tabBarIcon: ({ color, size }) => (
-            <BriefcaseBusiness color={color} size={size} />
-          ),
-        }}
+        options={{ tabBarButton: () => null }}
       />
       <Tab.Screen
         name="Événements"
         component={EventsNavigator}
-        options={{
-          tabBarLabel: "Événements",
-          tabBarIcon: ({ color, size }) => (
-            <CalendarDays color={color} size={size} />
-          ),
-        }}
+        options={{ tabBarButton: () => null }}
       />
     </Tab.Navigator>
   );
@@ -202,8 +194,23 @@ function RootNavigator() {
   );
 }
 
-function VoiceAssistantLayer() {
+function VoiceAssistantLayer({ currentRoute }: { currentRoute: string }) {
   const { isSessionLoading, requestAuthentication, user } = useAuth();
+  const { requestAssistant } = useVoiceAssistant();
+  const insets = useSafeAreaInsets();
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardDidShow", () =>
+      setKeyboardVisible(true),
+    );
+    const hide = Keyboard.addListener("keyboardDidHide", () =>
+      setKeyboardVisible(false),
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   if (isSessionLoading) return null;
 
   const navigate = (command: VoiceCommand) => {
@@ -256,18 +263,46 @@ function VoiceAssistantLayer() {
     return true;
   };
 
-  return <VoiceAssistantModal onNavigate={navigate} />;
+  const hideAssistant =
+    keyboardVisible ||
+    ["PhoneAuth", "CompleteProfile", "Welcome"].includes(currentRoute ?? "");
+  const assistantBottom =
+    currentRoute === "Messages"
+      ? 136
+      : currentRoute === "CarteSOS"
+        ? 104
+        : 66;
+  return (
+    <>
+      {!hideAssistant && (
+        <Pressable
+          accessibilityLabel="Assistant vocal"
+          accessibilityRole="button"
+          onPress={requestAssistant}
+          style={[styles.voiceButton, { bottom: insets.bottom + assistantBottom }]}
+        >
+          <Mic color="#ffffff" size={23} />
+        </Pressable>
+      )}
+      <VoiceAssistantModal onNavigate={navigate} />
+    </>
+  );
 }
 
 function AppNavigation() {
   const { clearActiveInput } = useVoiceAssistant();
+  const [currentRoute, setCurrentRoute] = useState("Welcome");
   return (
     <NavigationContainer
-      onStateChange={clearActiveInput}
+      onStateChange={() => {
+        clearActiveInput();
+        setCurrentRoute(navigationRef.getCurrentRoute()?.name ?? "");
+      }}
+      onReady={() => setCurrentRoute(navigationRef.getCurrentRoute()?.name ?? "")}
       ref={navigationRef}
     >
       <RootNavigator />
-      <VoiceAssistantLayer />
+      <VoiceAssistantLayer currentRoute={currentRoute} />
       <AuthPromptLayer />
     </NavigationContainer>
   );
@@ -312,6 +347,22 @@ function AuthPromptLayer() {
 }
 
 const styles = StyleSheet.create({
+  voiceButton: {
+    alignItems: "center",
+    backgroundColor: "#2563eb",
+    borderRadius: 28,
+    elevation: 8,
+    height: 56,
+    justifyContent: "center",
+    position: "absolute",
+    right: 18,
+    shadowColor: "#0f172a",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    width: 56,
+    zIndex: 20,
+  },
   loading: {
     alignItems: "center",
     backgroundColor: "#f8fafc",

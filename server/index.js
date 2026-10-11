@@ -7,6 +7,8 @@ import eventsRoutes from "./routes/eventsRoutes.js";
 import livekitRoutes from "./routes/livekitRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
 import proRoutes from "./routes/proRoutes.js";
+import publicRoutes from "./routes/publicRoutes.js";
+import sosRoutes from "./routes/sosRoutes.js";
 import ticketsRoutes from "./routes/ticketsRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import { createServer } from "node:http";
@@ -28,6 +30,8 @@ app.get(
   ["/api/v1/monetization/config", "/v1/monetization/config"],
   getMonetizationConfig,
 );
+app.use(["/api/v1/public", "/v1/public"], publicRoutes);
+app.use(["/api/v1/sos", "/v1/sos"], sosRoutes);
 app.use(["/api/v1/auth", "/v1/auth"], authRoutes);
 app.use(["/api/v1/events", "/v1/events"], eventsRoutes);
 app.use(["/api/v1/livekit", "/v1/livekit"], livekitRoutes);

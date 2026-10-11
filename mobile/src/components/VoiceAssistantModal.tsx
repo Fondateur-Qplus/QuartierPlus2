@@ -44,6 +44,7 @@ export default function VoiceAssistantModal({
     clearActiveInput,
     insertIntoFocusedInput,
     recognitionAvailable,
+    registerAssistantHandler,
     registerDictationHandler,
     setRecognitionAvailable,
   } = useVoiceAssistant();
@@ -81,6 +82,14 @@ export default function VoiceAssistantModal({
         void startListening("dictation");
       }),
     [registerDictationHandler],
+  );
+
+  useEffect(
+    () =>
+      registerAssistantHandler(() => {
+        void startListening("command");
+      }),
+    [registerAssistantHandler],
   );
 
   useSpeechRecognitionEvent("start", () => {
