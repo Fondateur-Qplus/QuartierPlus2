@@ -1,0 +1,234 @@
+import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
+import { test } from "node:test";
+
+process.env.NODE_ENV = "test";
+process.env.DATABASE_URL ??= "postgres://localhost/quartierplus_test";
+process.env.JWT_SECRET ??=
+  "unit-test-secret-that-is-longer-than-thirty-two-characters";
+process.env.OTP_TEST_MODE = "true";
+process.env.OTP_TEST_ALLOWLIST = "+22670000000";
+process.env.DOTENV_CONFIG_PATH = "/dev/null";
+
+const { requestOtp, verifyOtp } = await import("../controllers/authController.js");
+const { pool } = await import("../db/pool.js");
+const phoneNumber = "+22670000000";
+const jwtSecret = process.env.JWT_SECRET;
+
+const createResponse = () => ({
+  statusCode: 200,
+  payload: null,
+  status(code) {
+    this.statusCode = code;
+    return this;
+  },
+  json(payload) {
+    this.payload = payload;
+    return this;
+  },
+});
+
+const createClient = (query) => ({
+  query,
+  release() {},
+});
+
+test("registration OTP stores the validated details and creates the account after verification", async (context) => {
+  const registration = {
+    first_name: "Awa",
+    last_name: "Traoré",
+    full_name: "Awa Traoré",
+    email: "awa@example.com",
+    country_code: "BF",
+  };
+  const requestCalls = [];
+  const requestClient = createClient(async (statement, values = []) => {
+    requestCalls.push({ statement, values });
+    if (statement.includes("SELECT 1")) return { rowCount: 0, rows: [] };
+    return { rowCount: 1, rows: [] };
+  });
+  const verificationCalls = [];
+  const verificationClient = createClient(async (statement, values = []) => {
+    verificationCalls.push({ statement, values });
+    if (statement.includes("SELECT code_hash")) {
+      return {
+        rowCount: 1,
+        rows: [{
+          code_hash: createHmac("sha256", jwtSecret)
+            .update(`${phoneNumber}:123456`)
+            .digest("hex"),
+          attempts: 0,
+          registration_data: registration,
+        }],
+      };
+    }
+    if (statement.includes("INSERT INTO users")) {
+      return {
+        rowCount: 1,
+        rows: [{
+          id: "registered-user",
+          phone_number: phoneNumber,
+          email: registration.email,
+          full_name: registration.full_name,
+          country_code: registration.country_code,
+          is_verified: true,
+        }],
+      };
+    }
+    return { rowCount: 1, rows: [] };
+  });
+  let connectionCount = 0;
+
+  context.mock.method(pool, "query", async (statement) => {
+    if (statement.includes("FROM country_config")) {
+      return { rowCount: 1, rows: [{ code: "BF", phone_prefix: "+226" }] };
+    }
+    if (statement.includes("FROM users")) return { rowCount: 0, rows: [] };
+    throw new Error(`Unexpected pool query: ${statement}`);
+  });
+  context.mock.method(pool, "connect", async () => {
+    connectionCount += 1;
+    return connectionCount === 1 ? requestClient : verificationClient;
+  });
+
+  const requestResponse = createResponse();
+  await requestOtp(
+    {
+      body: {
+        flow: "register",
+        first_name: "Awa",
+        last_name: "Traoré",
+        country_code: "BF",
+        phone_number: phoneNumber,
+        email: registration.email,
+        terms_accepted: true,
+      },
+    },
+    requestResponse,
+    (error) => {
+      throw error;
+    },
+  );
+
+  assert.equal(requestResponse.statusCode, 200);
+  assert.equal(requestResponse.payload.test_code, "123456");
+  const otpInsert = requestCalls.find(({ statement }) =>
+    statement.includes("INSERT INTO otp_verifications"),
+  );
+  assert.ok(otpInsert);
+  assert.match(otpInsert.statement, /registration_data/);
+  assert.deepEqual(JSON.parse(otpInsert.values[2]), registration);
+
+  const verifyResponse = createResponse();
+  await verifyOtp(
+    { body: { identifier: phoneNumber, code: "123456" } },
+    verifyResponse,
+    (error) => {
+      throw error;
+    },
+  );
+
+  assert.equal(verifyResponse.statusCode, 200);
+  assert.equal(verifyResponse.payload.user.id, "registered-user");
+  assert.equal(verifyResponse.payload.user.name, "Awa Traoré");
+  assert.ok(verifyResponse.payload.token);
+  const userInsert = verificationCalls.find(({ statement }) =>
+    statement.includes("INSERT INTO users"),
+  );
+  assert.ok(userInsert);
+  assert.match(userInsert.statement, /terms_accepted_at/);
+  assert.deepEqual(userInsert.values, [
+    phoneNumber,
+    registration.email,
+    registration.full_name,
+    registration.first_name,
+    registration.last_name,
+    registration.country_code,
+  ]);
+});
+
+test("unknown phone login offers account creation without issuing an OTP", async (context) => {
+  let connectCalled = false;
+  context.mock.method(pool, "query", async () => ({ rowCount: 0, rows: [] }));
+  context.mock.method(pool, "connect", async () => {
+    connectCalled = true;
+    throw new Error("OTP should not be created for an unknown account.");
+  });
+
+  const response = createResponse();
+  await requestOtp(
+    { body: { flow: "login", identifier: phoneNumber } },
+    response,
+    (error) => {
+      throw error;
+    },
+  );
+
+  assert.equal(response.statusCode, 404);
+  assert.match(response.payload.error, /Créer un compte/);
+  assert.equal(connectCalled, false);
+});
+
+test("email login sends and verifies the OTP against the account phone", async (context) => {
+  const email = "awa@example.com";
+  const user = {
+    id: "existing-user",
+    phone_number: phoneNumber,
+    email,
+    full_name: "Awa Traoré",
+    country_code: "BF",
+    is_verified: true,
+  };
+  const client = createClient(async (statement) => {
+    if (statement.includes("SELECT 1")) return { rowCount: 0, rows: [] };
+    if (statement.includes("SELECT phone_number FROM users")) {
+      return { rowCount: 1, rows: [{ phone_number: phoneNumber }] };
+    }
+    if (statement.includes("SELECT code_hash")) {
+      return {
+        rowCount: 1,
+        rows: [{
+          code_hash: createHmac("sha256", jwtSecret)
+            .update(`${phoneNumber}:123456`)
+            .digest("hex"),
+          attempts: 0,
+          registration_data: null,
+        }],
+      };
+    }
+    if (statement.includes("UPDATE users")) {
+      return { rowCount: 1, rows: [user] };
+    }
+    return { rowCount: 1, rows: [] };
+  });
+  context.mock.method(pool, "query", async (statement) => {
+    if (statement.includes("LOWER(email) = $1")) {
+      return { rowCount: 1, rows: [{ phone_number: phoneNumber }] };
+    }
+    throw new Error(`Unexpected pool query: ${statement}`);
+  });
+  context.mock.method(pool, "connect", async () => client);
+
+  const requestResponse = createResponse();
+  await requestOtp(
+    { body: { flow: "login", identifier: email } },
+    requestResponse,
+    (error) => {
+      throw error;
+    },
+  );
+  assert.equal(requestResponse.statusCode, 200);
+  assert.equal(requestResponse.payload.test_code, "123456");
+
+  const verifyResponse = createResponse();
+  await verifyOtp(
+    { body: { identifier: email, code: "123456" } },
+    verifyResponse,
+    (error) => {
+      throw error;
+    },
+  );
+  assert.equal(verifyResponse.statusCode, 200);
+  assert.equal(verifyResponse.payload.user.phone_number, phoneNumber);
+  assert.equal(verifyResponse.payload.user.email, email);
+});

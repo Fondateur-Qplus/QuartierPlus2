@@ -9,6 +9,7 @@ const googleClient = new OAuth2Client(env.googleClientId || undefined);
 const OTP_TTL_MINUTES = 5;
 const OTP_MAX_ATTEMPTS = 5;
 const E164_PATTERN = /^\+[1-9]\d{7,14}$/;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const hashOtp = (phoneNumber, code) =>
   createHmac("sha256", env.jwtSecret)
@@ -87,14 +88,147 @@ const googleVerificationFailure = (error) =>
   });
 
 export const requestOtp = async (request, response, next) => {
-  const phoneNumber =
-    typeof request.body?.phone_number === "string"
-      ? request.body.phone_number.trim()
-      : "";
-  if (!E164_PATTERN.test(phoneNumber)) {
-    return response.status(400).json({
-      error: "Le numéro de téléphone doit être au format international E.164.",
-    });
+  const flow = request.body?.flow === "register" ? "register" : "login";
+  let phoneNumber = "";
+  let registrationData = null;
+
+  if (flow === "register") {
+    const firstName =
+      typeof request.body?.first_name === "string"
+        ? request.body.first_name.trim()
+        : "";
+    const lastName =
+      typeof request.body?.last_name === "string"
+        ? request.body.last_name.trim()
+        : "";
+    const email =
+      typeof request.body?.email === "string"
+        ? request.body.email.trim().toLowerCase()
+        : "";
+    const countryCode =
+      typeof request.body?.country_code === "string"
+        ? request.body.country_code.trim().toUpperCase()
+        : "";
+    phoneNumber =
+      typeof request.body?.phone_number === "string"
+        ? request.body.phone_number.trim()
+        : "";
+
+    if (
+      !firstName ||
+      !lastName ||
+      firstName.length > 100 ||
+      lastName.length > 100 ||
+      `${firstName} ${lastName}`.length > 100
+    ) {
+      return response.status(400).json({
+        error: "Saisissez un prénom et un nom valides (100 caractères maximum).",
+      });
+    }
+    if (!EMAIL_PATTERN.test(email) || email.length > 255) {
+      return response.status(400).json({ error: "Saisissez une adresse e-mail valide." });
+    }
+    if (!E164_PATTERN.test(phoneNumber)) {
+      return response.status(400).json({
+        error: "Le numéro de téléphone doit être au format international E.164.",
+      });
+    }
+    if (request.body?.terms_accepted !== true) {
+      return response.status(400).json({
+        error: "Vous devez accepter les conditions d’utilisation et la politique de confidentialité.",
+      });
+    }
+
+    try {
+      const country = await pool.query(
+        "SELECT code, phone_prefix FROM country_config WHERE code = $1",
+        [countryCode],
+      );
+      if (
+        country.rowCount === 0 ||
+        !phoneNumber.startsWith(country.rows[0].phone_prefix)
+      ) {
+        return response.status(400).json({
+          error: "Le pays sélectionné ne correspond pas à l’indicatif téléphonique.",
+        });
+      }
+      const existingAccount = await pool.query(
+        `SELECT 1 FROM users
+         WHERE phone_number = $1 OR phone_e164 = $1 OR LOWER(email) = $2
+         LIMIT 1`,
+        [phoneNumber, email],
+      );
+      if (existingAccount.rowCount > 0) {
+        return response.status(409).json({
+          error: "Un compte utilise déjà ce téléphone ou cette adresse e-mail. Connectez-vous.",
+        });
+      }
+    } catch (error) {
+      return next(error);
+    }
+
+    registrationData = {
+      first_name: firstName,
+      last_name: lastName,
+      full_name: `${firstName} ${lastName}`,
+      email,
+      country_code: countryCode,
+    };
+  } else {
+    const identifier =
+      typeof request.body?.identifier === "string"
+        ? request.body.identifier.trim()
+        : typeof request.body?.phone_number === "string"
+          ? request.body.phone_number.trim()
+          : "";
+    if (E164_PATTERN.test(identifier)) {
+      phoneNumber = identifier;
+      try {
+        const account = await pool.query(
+          `SELECT phone_number FROM users
+           WHERE (phone_number = $1 OR phone_e164 = $1)
+             AND is_verified = TRUE
+           LIMIT 1`,
+          [phoneNumber],
+        );
+        if (account.rowCount === 0) {
+          return response.status(404).json({
+            error: "Aucun compte vérifié ne correspond. Choisissez « Créer un compte ».",
+          });
+        }
+        phoneNumber = account.rows[0].phone_number ?? phoneNumber;
+      } catch (error) {
+        return next(error);
+      }
+    } else if (EMAIL_PATTERN.test(identifier)) {
+      try {
+        const account = await pool.query(
+          `SELECT phone_number FROM users
+           WHERE LOWER(email) = $1
+             AND is_verified = TRUE
+             AND phone_number IS NOT NULL
+           LIMIT 1`,
+          [identifier.toLowerCase()],
+        );
+        if (account.rowCount === 0) {
+          return response.status(404).json({
+            error: "Aucun compte vérifié ne correspond. Choisissez « Créer un compte ».",
+          });
+        }
+        phoneNumber = account.rows[0].phone_number;
+      } catch (error) {
+        return next(error);
+      }
+    } else {
+      return response.status(400).json({
+        error: "Saisissez un téléphone au format +indicatif ou une adresse e-mail valide.",
+      });
+    }
+    if (!E164_PATTERN.test(phoneNumber)) {
+      return response.status(400).json({
+        error: "Ce compte ne possède pas de téléphone valide pour recevoir le code.",
+      });
+    }
   }
 
   const useTestOtp = isOtpTestPhone(phoneNumber, env);
@@ -106,6 +240,7 @@ export const requestOtp = async (request, response, next) => {
     ? "123456"
     : String(randomInt(0, 1_000_000)).padStart(6, "0");
   const client = await pool.connect();
+  let otpStored = false;
   try {
     await client.query("BEGIN");
     await client.query(
@@ -128,16 +263,18 @@ export const requestOtp = async (request, response, next) => {
     }
     await client.query(
       `INSERT INTO otp_verifications
-         (phone_number, code_hash, expires_at, attempts, created_at)
-       VALUES ($1, $2, NOW() + INTERVAL '${OTP_TTL_MINUTES} minutes', 0, NOW())
+         (phone_number, code_hash, expires_at, attempts, created_at, registration_data)
+       VALUES ($1, $2, NOW() + INTERVAL '${OTP_TTL_MINUTES} minutes', 0, NOW(), $3::jsonb)
        ON CONFLICT (phone_number) DO UPDATE SET
          code_hash = EXCLUDED.code_hash,
          expires_at = EXCLUDED.expires_at,
          attempts = 0,
-         created_at = NOW()`,
-      [phoneNumber, hashOtp(phoneNumber, code)],
+         created_at = NOW(),
+         registration_data = EXCLUDED.registration_data`,
+      [phoneNumber, hashOtp(phoneNumber, code), JSON.stringify(registrationData)],
     );
     await client.query("COMMIT");
+    otpStored = true;
     if (!useTestOtp) await deliverOtp(phoneNumber, code);
     return response.status(200).json({
       message: "Si le numéro est valide, un code de vérification a été envoyé.",
@@ -152,6 +289,11 @@ export const requestOtp = async (request, response, next) => {
       .catch((cleanupError) => {
         console.error("Failed to remove undelivered OTP:", cleanupError);
       });
+    if (otpStored && !useTestOtp) {
+      return response.status(503).json({
+        error: "La livraison du code SMS a échoué. Réessayez plus tard.",
+      });
+    }
     return next(error);
   } finally {
     client.release();
@@ -320,20 +462,34 @@ export const verifyPhoneChangeOtp = async (request, response, next) => {
 };
 
 export const verifyOtp = async (request, response, next) => {
-  const phoneNumber =
-    typeof request.body?.phone_number === "string"
-      ? request.body.phone_number.trim()
-      : "";
+  const identifier =
+    typeof request.body?.identifier === "string"
+      ? request.body.identifier.trim()
+      : typeof request.body?.phone_number === "string"
+        ? request.body.phone_number.trim()
+        : "";
   const code = typeof request.body?.code === "string" ? request.body.code : "";
-  if (!E164_PATTERN.test(phoneNumber) || !/^\d{6}$/.test(code)) {
-    return response.status(400).json({ error: "Numéro ou code invalide." });
+  if ((!E164_PATTERN.test(identifier) && !EMAIL_PATTERN.test(identifier)) || !/^\d{6}$/.test(code)) {
+    return response.status(400).json({ error: "Identifiant ou code invalide." });
   }
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    let phoneNumber = identifier;
+    if (EMAIL_PATTERN.test(identifier)) {
+      const account = await client.query(
+        "SELECT phone_number FROM users WHERE LOWER(email) = $1 AND is_verified = TRUE FOR UPDATE",
+        [identifier.toLowerCase()],
+      );
+      if (account.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return response.status(401).json({ error: "Code invalide ou expiré." });
+      }
+      phoneNumber = account.rows[0].phone_number;
+    }
     const verification = await client.query(
-      `SELECT code_hash, attempts
+      `SELECT code_hash, attempts, registration_data
        FROM otp_verifications
        WHERE phone_number = $1 AND expires_at > NOW()
        FOR UPDATE`,
@@ -362,20 +518,47 @@ export const verifyOtp = async (request, response, next) => {
       return response.status(401).json({ error: "Code invalide ou expiré." });
     }
 
+    let result;
+    if (entry.registration_data) {
+      const registration = entry.registration_data;
+      result = await client.query(
+        `INSERT INTO users
+           (phone_number, phone_e164, email, full_name, first_name, last_name,
+            country_code, is_verified, phone_verified_at, terms_accepted_at)
+         VALUES ($1, $1, $2, $3, $4, $5, $6, TRUE, NOW(), NOW())
+         RETURNING id, phone_number, email, google_id, full_name, role,
+                   neighborhood, country_code, reputation_score, is_verified`,
+        [
+          phoneNumber,
+          registration.email,
+          registration.full_name,
+          registration.first_name,
+          registration.last_name,
+          registration.country_code,
+        ],
+      );
+    } else {
+      result = await client.query(
+        `UPDATE users
+         SET phone_number = COALESCE(phone_number, $1),
+             phone_e164 = COALESCE(phone_e164, $1),
+             is_verified = TRUE,
+             phone_verified_at = COALESCE(phone_verified_at, NOW()),
+             country_code = COALESCE(country_code, $2)
+         WHERE (phone_number = $1 OR phone_e164 = $1)
+           AND is_verified = TRUE
+         RETURNING id, phone_number, email, google_id, full_name, role,
+                   neighborhood, country_code, reputation_score, is_verified`,
+        [phoneNumber, await detectCountryCode(client, phoneNumber)],
+      );
+      if (result.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return response.status(401).json({ error: "Code invalide ou expiré." });
+      }
+    }
     await client.query(
       "DELETE FROM otp_verifications WHERE phone_number = $1",
       [phoneNumber],
-    );
-    const countryCode = await detectCountryCode(client, phoneNumber);
-    const result = await client.query(
-      `INSERT INTO users (phone_number, country_code, is_verified)
-       VALUES ($1, $2, TRUE)
-       ON CONFLICT (phone_number) DO UPDATE SET
-         country_code = COALESCE(EXCLUDED.country_code, users.country_code),
-         is_verified = TRUE
-       RETURNING id, phone_number, email, google_id, full_name, role,
-                 neighborhood, country_code, reputation_score, is_verified`,
-      [phoneNumber, countryCode],
     );
     await client.query("COMMIT");
     const user = result.rows[0];
@@ -385,6 +568,11 @@ export const verifyOtp = async (request, response, next) => {
     });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
+    if (error.code === "23505") {
+      return response.status(409).json({
+        error: "Un compte utilise déjà ce téléphone ou cette adresse e-mail. Connectez-vous.",
+      });
+    }
     return next(error);
   } finally {
     client.release();

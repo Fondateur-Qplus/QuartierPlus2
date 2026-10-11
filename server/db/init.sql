@@ -44,8 +44,12 @@ CREATE TABLE IF NOT EXISTS otp_verifications (
     code_hash VARCHAR(64) NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
     attempts INT NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    registration_data JSONB
 );
+
+ALTER TABLE otp_verifications
+    ADD COLUMN IF NOT EXISTS registration_data JSONB;
 
 CREATE TABLE IF NOT EXISTS sos_alerts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

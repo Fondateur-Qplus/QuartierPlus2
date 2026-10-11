@@ -180,10 +180,7 @@ function RootNavigator() {
   }
 
   const hasCompletedProfile =
-    typeof user?.name === "string" &&
-    user.name.trim().length > 0 &&
-    typeof user?.neighborhood === "string" &&
-    user.neighborhood.trim().length > 0;
+    typeof user?.name === "string" && user.name.trim().length > 0;
 
   return (
     <Stack.Navigator
@@ -211,10 +208,7 @@ function VoiceAssistantLayer() {
 
   const navigate = (command: VoiceCommand) => {
     const hasCompletedProfile =
-      typeof user.name === "string" &&
-      user.name.trim().length > 0 &&
-      typeof user.neighborhood === "string" &&
-      user.neighborhood.trim().length > 0;
+      typeof user.name === "string" && user.name.trim().length > 0;
     if (!navigationRef.isReady() || !hasCompletedProfile) return false;
     switch (command.destination) {
       case "CarteSOS":
@@ -271,9 +265,9 @@ function AppNavigation() {
 
 function AuthPromptLayer() {
   const { authPromptVisible, dismissAuthPrompt } = useAuth();
-  const openAuth = () => {
+  const openAuth = (mode: "login" | "register") => {
     dismissAuthPrompt();
-    navigationRef.navigate("PhoneAuth");
+    navigationRef.navigate("PhoneAuth", { mode });
   };
   return (
     <Modal
@@ -295,10 +289,10 @@ function AuthPromptLayer() {
           <View style={styles.promptIcon}><LockKeyhole color="#b9382f" size={23} /></View>
           <Text accessibilityRole="header" style={styles.promptTitle}>Connectez-vous pour continuer</Text>
           <Text style={styles.promptCopy}>Créez un compte ou connectez-vous pour accéder à cette action.</Text>
-          <Pressable accessibilityRole="button" onPress={openAuth} style={styles.promptPrimary}>
+          <Pressable accessibilityRole="button" onPress={() => openAuth("login")} style={styles.promptPrimary}>
             <Text style={styles.promptPrimaryText}>Se connecter</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" onPress={openAuth} style={styles.promptSecondary}>
+          <Pressable accessibilityRole="button" onPress={() => openAuth("register")} style={styles.promptSecondary}>
             <Text style={styles.promptSecondaryText}>Créer un compte</Text>
           </Pressable>
         </View>

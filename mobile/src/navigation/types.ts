@@ -47,7 +47,7 @@ export type EventsStackParamList = {
 
 export type RootStackParamList = {
   Welcome: undefined;
-  PhoneAuth: undefined;
+  PhoneAuth: { mode?: "login" | "register" } | undefined;
   CompleteProfile: undefined;
   Main: NavigatorScreenParams<MainTabParamList>;
   Checkout: undefined;

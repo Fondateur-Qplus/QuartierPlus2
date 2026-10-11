@@ -39,12 +39,15 @@ export default function GuestWelcomeScreen() {
   const slide = slides[index];
   const Icon = slide.Icon;
 
-  const continueTo = async (destination: "Main" | "PhoneAuth") => {
+  const continueTo = async (
+    destination: "Main" | "PhoneAuth",
+    mode: "login" | "register" = "login",
+  ) => {
     await SecureStore.setItemAsync("quartierplus.introduction-seen", "true").catch(
       () => undefined,
     );
     if (destination === "Main") navigation.replace("Main", { screen: "Accueil" });
-    else navigation.replace("PhoneAuth");
+    else navigation.replace("PhoneAuth", { mode });
   };
 
   return (
@@ -89,10 +92,10 @@ export default function GuestWelcomeScreen() {
             <Text style={styles.exploreText}>Explorer l’app</Text>
           </Pressable>
           <View style={styles.authActions}>
-            <Pressable accessibilityRole="button" onPress={() => void continueTo("PhoneAuth")} style={styles.secondaryButton}>
+            <Pressable accessibilityRole="button" onPress={() => void continueTo("PhoneAuth", "login")} style={styles.secondaryButton}>
               <Text style={styles.secondaryText}>Se connecter</Text>
             </Pressable>
-            <Pressable accessibilityRole="button" onPress={() => void continueTo("PhoneAuth")} style={styles.secondaryButton}>
+            <Pressable accessibilityRole="button" onPress={() => void continueTo("PhoneAuth", "register")} style={styles.secondaryButton}>
               <Text style={styles.secondaryText}>Créer un compte</Text>
             </Pressable>
           </View>
