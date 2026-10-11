@@ -1,82 +1,60 @@
-import { useEffect, useState } from "react";
-import { useIdTokenAuthRequest } from "expo-auth-session/providers/google";
-import * as WebBrowser from "expo-web-browser";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useAuth, type AuthUser } from "../../context/AuthContext";
 import api from "../../services/api";
 
-WebBrowser.maybeCompleteAuthSession();
-
-const googleClientIds = {
-  androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
-  iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-};
-
-const hasGoogleClientId = Object.values(googleClientIds).some(Boolean);
+const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim() ?? "";
+const validGoogleWebClientId =
+  /^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(googleWebClientId);
 
 export default function GoogleAuthScreen() {
   const { setSession } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
-  const [request, response, promptAsync] = useIdTokenAuthRequest(googleClientIds);
+  const [unavailable, setUnavailable] = useState(!validGoogleWebClientId);
 
-  useEffect(() => {
-    if (response?.type !== "success") return;
-    const idToken =
-      response.params.id_token ?? response.authentication?.idToken ?? null;
-    if (!idToken) {
-      Alert.alert("Connexion Google", "Google n'a pas renvoyé de jeton d'identité.");
+  const signIn = async () => {
+    if (!validGoogleWebClientId || isLoading) {
+      setUnavailable(true);
       return;
     }
-    let mounted = true;
     setIsLoading(true);
-    void api
-      .post("/api/v1/auth/google", { id_token: idToken })
-      .then(async ({ data }) => {
-        const result = data as { token?: unknown; user?: unknown };
-        const user = result.user as AuthUser | undefined;
-        if (typeof result.token !== "string" || !user || typeof user.id !== "string") {
-          throw new Error("La réponse d'authentification Google est invalide.");
-        }
-        await setSession(result.token, user);
-      })
-      .catch((error: unknown) => {
-        if (!mounted) return;
-        const message =
-          typeof error === "object" &&
-          error !== null &&
-          "response" in error &&
-          typeof error.response === "object" &&
-          error.response !== null &&
-          "data" in error.response &&
-          typeof error.response.data === "object" &&
-          error.response.data !== null &&
-          "error" in error.response.data &&
-          typeof error.response.data.error === "string"
-            ? error.response.data.error
-            : error instanceof Error
-              ? error.message
-              : "La connexion Google a échoué.";
-        Alert.alert("Connexion Google", message);
-      })
-      .finally(() => {
-        if (mounted) setIsLoading(false);
+    setUnavailable(false);
+    try {
+      const { GoogleSignin } = await import("@react-native-google-signin/google-signin");
+      GoogleSignin.configure({ webClientId: googleWebClientId });
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      const result = await GoogleSignin.signIn();
+      if (result.type === "cancelled") return;
+      const idToken = result.data.idToken;
+      if (!idToken) {
+        setUnavailable(true);
+        return;
+      }
+
+      const { data } = await api.post("/api/v1/auth/google", {
+        id_token: idToken,
       });
-    return () => {
-      mounted = false;
-    };
-  }, [response, setSession]);
+      const response = data as { token?: unknown; user?: unknown };
+      const user = response.user as AuthUser | undefined;
+      if (typeof response.token !== "string" || !user || typeof user.id !== "string") {
+        throw new Error("La réponse de connexion Google est invalide.");
+      }
+      await setSession(response.token, user);
+    } catch {
+      console.warn("La connexion Google native est indisponible.");
+      setUnavailable(true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ disabled: !request || isLoading || !hasGoogleClientId }}
-      disabled={!request || isLoading || !hasGoogleClientId}
-      onPress={() => void promptAsync()}
-      style={[
-        styles.button,
-        (!request || isLoading || !hasGoogleClientId) && styles.disabled,
-      ]}
+      accessibilityState={{ disabled: isLoading || unavailable }}
+      disabled={isLoading || unavailable}
+      onPress={() => void signIn()}
+      style={[styles.button, (isLoading || unavailable) && styles.disabled]}
     >
       <View style={styles.googleMark}>
         <Text style={styles.googleMarkText}>G</Text>
@@ -84,9 +62,9 @@ export default function GoogleAuthScreen() {
       <Text style={styles.buttonText}>
         {isLoading
           ? "Connexion en cours..."
-          : hasGoogleClientId
-            ? "Continuer avec Google"
-            : "Google indisponible (configuration requise)"}
+          : unavailable
+            ? "Google bientôt disponible"
+            : "Continuer avec Google"}
       </Text>
     </Pressable>
   );
