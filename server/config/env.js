@@ -47,6 +47,17 @@ const otpTestMode = otpTestModeValue === "true";
 if (isProduction && otpTestMode) {
   throw new Error("OTP_TEST_MODE must not be enabled in production.");
 }
+const otpTestAllowlist = [
+  ...new Set(
+    optional("OTP_TEST_ALLOWLIST")
+      .split(",")
+      .map((phoneNumber) => phoneNumber.trim())
+      .filter(Boolean),
+  ),
+];
+if (otpTestAllowlist.some((phoneNumber) => !/^\+[1-9]\d{7,14}$/.test(phoneNumber))) {
+  throw new Error("OTP_TEST_ALLOWLIST must contain comma-separated E.164 phone numbers.");
+}
 
 const smsDeliveryUrl = optional("SMS_DELIVERY_URL");
 const smsDeliveryToken = optional("SMS_DELIVERY_TOKEN");
@@ -126,6 +137,7 @@ export const env = Object.freeze({
       .map((clientId) => clientId.trim()),
   ].filter((clientId, index, all) => clientId && all.indexOf(clientId) === index),
   otpTestMode,
+  otpTestAllowlist,
   smsDeliveryUrl,
   smsDeliveryToken,
   livekitApiKey,

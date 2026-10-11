@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
@@ -17,12 +17,54 @@ import api from "../../services/api";
 import GoogleAuthScreen from "./GoogleAuthScreen";
 import type { RootStackParamList } from "../../navigation/types";
 
-const COUNTRIES = [
-  { name: "Burkina Faso", prefix: "+226" },
-  { name: "Côte d'Ivoire", prefix: "+225" },
-  { name: "Sénégal", prefix: "+221" },
-  { name: "Mali", prefix: "+223" },
+type PhoneCountry = {
+  code: string;
+  name: string;
+  prefix: string;
+};
+
+const FALLBACK_COUNTRIES: PhoneCountry[] = [
+  { code: "BF", name: "Burkina Faso", prefix: "+226" },
+  { code: "CI", name: "Côte d'Ivoire", prefix: "+225" },
+  { code: "SN", name: "Sénégal", prefix: "+221" },
+  { code: "ML", name: "Mali", prefix: "+223" },
+  { code: "FR", name: "France", prefix: "+33" },
+  { code: "US", name: "États-Unis", prefix: "+1" },
 ];
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const parsePhoneCountries = (value: unknown): PhoneCountry[] => {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("La liste des pays renvoyée par l'API est invalide.");
+  }
+  const countries = value.map((item): PhoneCountry => {
+    if (
+      !isRecord(item) ||
+      typeof item.code !== "string" ||
+      !/^[A-Z]{2,3}$/.test(item.code) ||
+      typeof item.name !== "string" ||
+      !item.name.trim() ||
+      typeof item.phone_prefix !== "string" ||
+      !/^\+[1-9]\d{0,3}$/.test(item.phone_prefix)
+    ) {
+      throw new Error("La liste des pays renvoyée par l'API est invalide.");
+    }
+    return {
+      code: item.code,
+      name: item.name,
+      prefix: item.phone_prefix,
+    };
+  });
+  if (new Set(countries.map((country) => country.code)).size !== countries.length) {
+    throw new Error("La liste des pays renvoyée par l'API contient des doublons.");
+  }
+  return countries;
+};
+
+const normalizeCountrySearch = (value: string) =>
+  value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
 
 const responseError = (error: unknown, fallback: string) => {
   if (typeof error === "object" && error !== null && "response" in error) {
@@ -41,13 +83,72 @@ const responseError = (error: unknown, fallback: string) => {
 export default function PhoneAuthScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { setSession, user } = useAuth();
-  const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
+  const [countries, setCountries] = useState(FALLBACK_COUNTRIES);
+  const [selectedCountry, setSelectedCountry] = useState(FALLBACK_COUNTRIES[0]);
+  const [countrySearch, setCountrySearch] = useState("");
+  const [countryListError, setCountryListError] = useState<string | null>(null);
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [otpRequested, setOtpRequested] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const visibleCountries = useMemo(() => {
+    const query = normalizeCountrySearch(countrySearch.trim());
+    if (query) {
+      return countries
+        .filter((country) =>
+          normalizeCountrySearch(
+            `${country.name} ${country.code} ${country.prefix}`,
+          ).includes(query),
+        )
+        .slice(0, 24);
+    }
+    const preferredCodes = [
+      selectedCountry.code,
+      "BF",
+      "CI",
+      "SN",
+      "ML",
+      "FR",
+      "US",
+    ];
+    return preferredCodes
+      .map((code) => countries.find((country) => country.code === code))
+      .filter((country): country is PhoneCountry => Boolean(country))
+      .filter(
+        (country, index, all) =>
+          all.findIndex((candidate) => candidate.code === country.code) === index,
+      );
+  }, [countries, countrySearch, selectedCountry.code]);
+
+  useEffect(() => {
+    let mounted = true;
+    void api
+      .get<{ countries?: unknown }>("/api/v1/auth/countries")
+      .then((response) => {
+        const loadedCountries = parsePhoneCountries(response.data.countries);
+        if (!mounted) return;
+        setCountries(loadedCountries);
+        setSelectedCountry(
+          (current) =>
+            loadedCountries.find((country) => country.code === current.code) ??
+            loadedCountries[0],
+        );
+        setCountryListError(null);
+      })
+      .catch(() => {
+        if (mounted) {
+          setCountryListError(
+            "La liste mondiale est indisponible; seuls les pays courants sont proposés.",
+          );
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -135,15 +236,32 @@ export default function PhoneAuthScreen() {
         </Text>
 
         <Text style={styles.label}>Pays</Text>
+        <TextInput
+          accessibilityLabel="Rechercher un pays"
+          autoCapitalize="none"
+          onChangeText={setCountrySearch}
+          placeholder="Rechercher par pays, code ou indicatif"
+          placeholderTextColor="#94a3b8"
+          style={styles.countrySearch}
+          value={countrySearch}
+        />
+        {countryListError && (
+          <Text accessibilityRole="alert" style={styles.countryListError}>
+            {countryListError}
+          </Text>
+        )}
         <View style={styles.countryList}>
-          {COUNTRIES.map((country) => {
-            const selected = selectedCountry.prefix === country.prefix;
+          {visibleCountries.map((country) => {
+            const selected = selectedCountry.code === country.code;
             return (
               <Pressable
                 accessibilityRole="button"
                 accessibilityState={{ selected }}
-                key={country.prefix}
-                onPress={() => setSelectedCountry(country)}
+                key={country.code}
+                onPress={() => {
+                  setSelectedCountry(country);
+                  setCountrySearch("");
+                }}
                 style={[styles.countryOption, selected && styles.countryOptionSelected]}
               >
                 <Text
@@ -259,6 +377,8 @@ const styles = StyleSheet.create({
   title: { color: "#0f172a", fontSize: 26, fontWeight: "700", textAlign: "center" },
   subtitle: { color: "#64748b", fontSize: 15, lineHeight: 22, marginBottom: 28, marginTop: 10, textAlign: "center" },
   label: { color: "#334155", fontSize: 14, fontWeight: "600", marginBottom: 8, marginTop: 14 },
+  countrySearch: { backgroundColor: "#ffffff", borderColor: "#cbd5e1", borderRadius: 10, borderWidth: 1, color: "#0f172a", fontSize: 14, marginBottom: 8, minHeight: 44, paddingHorizontal: 12 },
+  countryListError: { color: "#92400e", fontSize: 12, lineHeight: 18, marginBottom: 8 },
   countryList: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   countryOption: { backgroundColor: "#ffffff", borderColor: "#cbd5e1", borderRadius: 18, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8 },
   countryOptionSelected: { backgroundColor: "#eff6ff", borderColor: "#2563eb" },

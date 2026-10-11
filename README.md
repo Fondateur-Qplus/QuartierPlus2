@@ -4,11 +4,24 @@ Plateforme hybride communautaire, sécuritaire et sociale
 ## Schéma PostgreSQL du serveur
 
 Pour une base serveur vierge disposant des extensions PostgreSQL `uuid-ossp` et
-PostGIS, exécuter `psql "$DATABASE_URL" -f server/db/schema.sql`, puis
-`psql "$DATABASE_URL" -f server/db/seeds.sql` pour initialiser les pays cibles
-et les canaux MVP. `server/db/schema.sql` est un schéma initial autonome : ne
-pas le combiner directement avec `database/schema.sql`, qui définit déjà des
-tables `users` et `sos_alerts` avec des colonnes différentes.
+PostGIS, exécuter dans cet ordre :
+
+```sh
+psql "$DATABASE_URL" -f server/db/init.sql
+psql "$DATABASE_URL" -f server/db/seeds.sql
+```
+
+`init.sql` crée le schéma idempotent utilisé par l'API; `seeds.sql` peut être
+rejoué pour mettre à jour les pays et créer les canaux MVP sans doublons.
+Les seeds couvrent 193 membres de l'ONU ainsi que Taïwan, le Kosovo, la
+Palestine et le Vatican. Les préfixes détaillés sont stockés dans
+`country_phone_prefixes`; l'API choisit le préfixe correspondant le plus long
+pour distinguer les plans partagés comme +1 et +7.
+Les numéros d'urgence inconnus sont laissés vides plutôt que supposés égaux à
+112.
+`server/db/schema.sql` est un ancien schéma initial : ne pas le combiner avec
+`init.sql` ni avec `database/schema.sql`, qui définit déjà des tables `users`
+et `sos_alerts` avec des colonnes différentes.
 
 ## API Express et authentification
 
@@ -20,12 +33,17 @@ démarrer sans la livraison SMS HTTPS, Google OAuth, les trois variables
 LiveKit et un `TICKET_QR_SECRET` distinct d'au moins 32 caractères. Pour une
 base créée avec l'ancien schéma A.1,
 appliquer `server/db/auth-migration.sql`; une nouvelle base utilise directement
-`server/db/schema.sql`. Pour une base existante avant la prise en charge du type
+`server/db/init.sql`, puis `server/db/seeds.sql`. Pour une base existante avant la prise en charge du type
 d'urgence SOS, appliquer aussi `server/db/sos-emergency-type-migration.sql`.
+Avant de déployer une version utilisant la détection mondiale des pays sur une
+base existante, rejouer aussi `server/db/init.sql`, puis `server/db/seeds.sql`.
 
 `POST /api/v1/auth/request-otp` accepte `{ "phone_number": "+226..." }` en
-format E.164. En développement, `OTP_TEST_MODE=true` active le code fixe
-`123456` et le renvoie comme `test_code`; ce mode est refusé en production.
+format E.164. En développement, `OTP_TEST_MODE=true` n'active le code fixe
+`123456` que pour les numéros E.164 listés dans `OTP_TEST_ALLOWLIST` (séparés
+par des virgules); les autres numéros utilisent un code aléatoire et la
+livraison SMS normale. Le mode est refusé au démarrage en production, même avec
+une liste blanche.
 En production, configurer `SMS_DELIVERY_URL` et `SMS_DELIVERY_TOKEN`: le serveur
 fait un POST HTTPS avec Bearer et un JSON `{ "to", "message" }` au relais SMS.
 Les codes expirent après cinq minutes, sont stockés sous forme de HMAC, sont
@@ -38,6 +56,10 @@ un JWT d'application avec le profil. `POST /api/v1/auth/google` accepte un
 avec `GOOGLE_CLIENT_ID` et, facultativement, les identifiants supplémentaires
 de `GOOGLE_CLIENT_IDS` (liste séparée par des virgules); l'adresse e-mail doit
 être vérifiée par Google.
+Le premier lancement propose le parcours invité : « Explorer l'app » ouvre les
+écrans accessibles sans compte. Les actions nécessitant une identité affichent
+la demande de connexion; les informations d'urgence invitées restent
+disponibles depuis le profil.
 `GET` et `PUT /api/v1/users/me` nécessitent `Authorization: Bearer <JWT>`.
 Les routes `/v1/...` sont aussi montées pour compatibilité avec l'URL d'API
 utilisée par l'application mobile.
@@ -45,7 +67,8 @@ utilisée par l'application mobile.
 ### Authentification mobile B.2
 
 Le parcours mobile démarre par la saisie du téléphone et du préfixe pays
-(Burkina Faso, Côte d'Ivoire, Sénégal ou Mali), envoie un code par
+(la liste complète est chargée depuis `GET /api/v1/auth/countries`; si l'API
+est indisponible, un petit choix de pays courants reste proposé), envoie un code par
 `POST /api/v1/auth/request-otp`, puis vérifie le code à six chiffres par
 `POST /api/v1/auth/verify-otp`. Le JWT et le profil retournés sont conservés via
 `AuthContext` et le stockage sécurisé natif. Google Sign-In utilise

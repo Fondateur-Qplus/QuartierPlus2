@@ -2,6 +2,7 @@ import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
 import { env } from "../config/env.js";
+import { isOtpTestPhone } from "../config/otp.js";
 import { pool } from "../db/pool.js";
 
 const googleClient = new OAuth2Client(env.googleClientId || undefined);
@@ -35,9 +36,6 @@ const userProfile = (user) => ({
 });
 
 const deliverOtp = async (phoneNumber, code) => {
-  if (env.otpTestMode && env.nodeEnv !== "production") {
-    return;
-  }
   if (!env.smsDeliveryUrl || !env.smsDeliveryToken) {
     throw new Error("Le service SMS n'est pas configuré.");
   }
@@ -60,14 +58,27 @@ const deliverOtp = async (phoneNumber, code) => {
 
 const detectCountryCode = async (client, phoneNumber) => {
   const result = await client.query(
-    `SELECT code
-     FROM country_config
+    `SELECT country_code AS code
+     FROM country_phone_prefixes
      WHERE $1 LIKE phone_prefix || '%'
-     ORDER BY length(phone_prefix) DESC
+     ORDER BY length(phone_prefix) DESC, country_code
      LIMIT 1`,
     [phoneNumber],
   );
   return result.rows[0]?.code ?? null;
+};
+
+export const listCountries = async (_request, response, next) => {
+  try {
+    const result = await pool.query(
+      `SELECT code, name, phone_prefix
+       FROM country_config
+       ORDER BY name, code`,
+    );
+    return response.status(200).json({ countries: result.rows });
+  } catch (error) {
+    return next(error);
+  }
 };
 
 const googleVerificationFailure = (error) =>
@@ -86,14 +97,12 @@ export const requestOtp = async (request, response, next) => {
     });
   }
 
-  if (
-    !(env.otpTestMode && env.nodeEnv !== "production") &&
-    (!env.smsDeliveryUrl || !env.smsDeliveryToken)
-  ) {
+  const useTestOtp = isOtpTestPhone(phoneNumber, env);
+  if (!useTestOtp && (!env.smsDeliveryUrl || !env.smsDeliveryToken)) {
     return response.status(503).json({ error: "Le service SMS est indisponible." });
   }
 
-  const code = env.otpTestMode && env.nodeEnv !== "production"
+  const code = useTestOtp
     ? "123456"
     : String(randomInt(0, 1_000_000)).padStart(6, "0");
   const client = await pool.connect();
@@ -129,12 +138,10 @@ export const requestOtp = async (request, response, next) => {
       [phoneNumber, hashOtp(phoneNumber, code)],
     );
     await client.query("COMMIT");
-    await deliverOtp(phoneNumber, code);
+    if (!useTestOtp) await deliverOtp(phoneNumber, code);
     return response.status(200).json({
       message: "Si le numéro est valide, un code de vérification a été envoyé.",
-      ...(env.otpTestMode && env.nodeEnv !== "production"
-        ? { test_code: "123456" }
-        : {}),
+      ...(useTestOtp ? { test_code: "123456" } : {}),
     });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -161,17 +168,14 @@ export const requestPhoneChangeOtp = async (request, response, next) => {
       error: "Le numéro de téléphone doit être au format international E.164.",
     });
   }
-  if (
-    !(env.otpTestMode && env.nodeEnv !== "production") &&
-    (!env.smsDeliveryUrl || !env.smsDeliveryToken)
-  ) {
+  const useTestOtp = isOtpTestPhone(phoneNumber, env);
+  if (!useTestOtp && (!env.smsDeliveryUrl || !env.smsDeliveryToken)) {
     return response.status(503).json({ error: "Le service SMS est indisponible." });
   }
 
-  const code =
-    env.otpTestMode && env.nodeEnv !== "production"
-      ? "123456"
-      : String(randomInt(0, 1_000_000)).padStart(6, "0");
+  const code = useTestOtp
+    ? "123456"
+    : String(randomInt(0, 1_000_000)).padStart(6, "0");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -214,12 +218,10 @@ export const requestPhoneChangeOtp = async (request, response, next) => {
       [phoneNumber, hashOtp(phoneNumber, code)],
     );
     await client.query("COMMIT");
-    await deliverOtp(phoneNumber, code);
+    if (!useTestOtp) await deliverOtp(phoneNumber, code);
     return response.status(200).json({
       message: "Un code de vérification a été envoyé.",
-      ...(env.otpTestMode && env.nodeEnv !== "production"
-        ? { test_code: "123456" }
-        : {}),
+      ...(useTestOtp ? { test_code: "123456" } : {}),
     });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});

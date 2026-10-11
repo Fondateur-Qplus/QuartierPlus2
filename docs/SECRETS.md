@@ -38,7 +38,6 @@ l'application :
 
 - `DATABASE_URL`
 - `JWT_SECRET`
-- `HMAC_SECRET`
 - `API_KEY_SALT`
 - `FIREBASE_PRIVATE_KEY`
 - `FIREBASE_CLIENT_EMAIL`
@@ -56,3 +55,7 @@ l'application :
 `FEDAPAY_ENVIRONMENT`, `SMS_DELIVERY_URL` et les variables de configuration
 serveur restent côté serveur. Même les clés publiques serveur ne sont pas des
 variables de build de l'application.
+
+Le HMAC utilisé pour `otp_verifications.code_hash` dérive de `JWT_SECRET` dans
+`server/controllers/authController.js`; `HMAC_SECRET` n'est pas lu par le code
+actuel. Ne pas créer ni modifier de secret Render pour cette correction.

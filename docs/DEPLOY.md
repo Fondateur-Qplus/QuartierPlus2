@@ -102,6 +102,7 @@ invaliderait les signatures des billets déjà émis.
 | --- | --- |
 | `GOOGLE_CLIENT_IDS` | Autres identifiants OAuth autorisés, séparés par des virgules |
 | `JWT_EXPIRES_IN` | Durée de validité des jetons ; valeur par défaut : `7d` |
+| `OTP_TEST_ALLOWLIST` | Numéros E.164 séparés par des virgules, uniquement pour le code OTP de test hors production |
 | `IS_PROMO_FREE_ACCESS` | `true` ou `false` pour le mode découverte |
 | `FEDAPAY_SECRET_KEY` | Clé secrète FedaPay pour les paiements |
 | `FEDAPAY_PUBLIC_KEY` | Clé publique FedaPay |
@@ -110,7 +111,14 @@ invaliderait les signatures des billets déjà émis.
 | `SOCKET_CORS_ORIGIN` | Origines web autorisées, séparées par des virgules |
 
 `PORT` est fourni par Render : ne le créez pas manuellement. `OTP_TEST_MODE`
-doit être absent ou `false` en production ; le serveur refuse `true`.
+doit être absent ou `false` en production ; le serveur refuse `true`, même si
+`OTP_TEST_ALLOWLIST` est renseignée. Hors production, seul un numéro présent
+dans cette liste reçoit le code fixe `123456`; les autres numéros exigent la
+configuration SMS et reçoivent un code aléatoire.
+
+Le HMAC des codes stockés dans `code_hash` utilise `JWT_SECRET` dans
+`authController.js`; aucun `HMAC_SECRET` distinct n'est lu par l'API. Render
+doit donc conserver le secret existant sous `JWT_SECRET` (sans rotation).
 
 ## 4. Vérifier et récupérer l'URL pour l'application
 

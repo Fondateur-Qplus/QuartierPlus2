@@ -11,6 +11,7 @@ const productionEnv = {
   JWT_SECRET: "production-jwt-secret-with-at-least-32-characters",
   TICKET_QR_SECRET: "production-ticket-secret-with-at-least-32-characters",
   OTP_TEST_MODE: "false",
+  OTP_TEST_ALLOWLIST: "+22670000000",
   SMS_DELIVERY_URL: "https://sms.example.invalid/send",
   SMS_DELIVERY_TOKEN: "fake-sms-token",
   GOOGLE_CLIENT_ID: "fake-google-client-id",
@@ -42,6 +43,23 @@ test("production environment rejects missing service credentials", () => {
     assert.notEqual(result.status, 0, `${name} should be required`);
     assert.match(result.stderr, new RegExp(name));
   }
+});
+
+test("production environment rejects test OTP mode even with an allowlisted number", () => {
+  const result = loadProductionConfig({
+    OTP_TEST_MODE: "true",
+    OTP_TEST_ALLOWLIST: "+22670000000",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /OTP_TEST_MODE must not be enabled in production/);
+});
+
+test("production environment rejects malformed OTP allowlist entries", () => {
+  const result = loadProductionConfig({
+    OTP_TEST_ALLOWLIST: "+22670000000,not-a-phone",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /OTP_TEST_ALLOWLIST/);
 });
 
 test("production environment rejects malformed URLs and boolean variables", () => {

@@ -11,6 +11,12 @@ CREATE TABLE IF NOT EXISTS country_config (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS country_phone_prefixes (
+    country_code VARCHAR(3) NOT NULL REFERENCES country_config(code) ON DELETE CASCADE,
+    phone_prefix VARCHAR(16) NOT NULL,
+    PRIMARY KEY (country_code, phone_prefix)
+);
+
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     phone_number VARCHAR(20) UNIQUE,

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import {
   googleAuth,
+  listCountries,
   requestOtp,
   requestPhoneChangeOtp,
   verifyOtp,
@@ -25,6 +26,7 @@ const credentialLimiter = rateLimit({
   message: { error: "Trop de tentatives. Réessayez dans quelques minutes." },
 });
 
+router.get("/countries", listCountries);
 router.post("/request-otp", otpRequestLimiter, requestOtp);
 router.post("/verify-otp", credentialLimiter, verifyOtp);
 router.post("/google", credentialLimiter, googleAuth);
