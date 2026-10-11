@@ -69,7 +69,7 @@ jobs:
           CHANNELS="$(mktemp)"
           trap 'rm -f "$BRANCHES" "$CHANNELS"' EXIT
 
-          if ! eas branch:list --limit 100 --json > "$BRANCHES"; then
+          if ! eas branch:list --limit 50 --json > "$BRANCHES"; then
             echo "::error::Impossible de lister les branches EAS; vérifier le jeton et le projet quartierplus."
             exit 1
           fi
