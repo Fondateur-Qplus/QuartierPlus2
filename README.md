@@ -38,8 +38,12 @@ d'urgence SOS, appliquer aussi `server/db/sos-emergency-type-migration.sql`.
 Avant de déployer une version utilisant la détection mondiale des pays sur une
 base existante, rejouer aussi `server/db/init.sql`, puis `server/db/seeds.sql`.
 
-`POST /api/v1/auth/request-otp` accepte `{ "phone_number": "+226..." }` en
-format E.164. En développement, `OTP_TEST_MODE=true` n'active le code fixe
+`POST /api/v1/auth/request-otp` accepte un identifiant de connexion (téléphone
+E.164 ou e-mail) et envoie un code au numéro vérifié du compte. Pour
+l'inscription, il reçoit prénom, nom, pays, téléphone E.164, e-mail et
+confirmation obligatoire des conditions/confidentialité; le compte est créé
+seulement après validation du code. Un identifiant inconnu reçoit une réponse
+qui propose de créer un compte. En développement, `OTP_TEST_MODE=true` n'active le code fixe
 `123456` que pour les numéros E.164 listés dans `OTP_TEST_ALLOWLIST` (séparés
 par des virgules); les autres numéros utilisent un code aléatoire et la
 livraison SMS normale. Le mode est refusé au démarrage en production, même avec
@@ -50,7 +54,7 @@ Les codes expirent après cinq minutes, sont stockés sous forme de HMAC, sont
 limités à cinq essais et une demande par minute et par numéro; des limiteurs
 supplémentaires s'appliquent par IP.
 
-`POST /api/v1/auth/verify-otp` accepte `{ "phone_number", "code" }` et renvoie
+`POST /api/v1/auth/verify-otp` accepte `{ "identifier", "code" }` et renvoie
 un JWT d'application avec le profil. `POST /api/v1/auth/google` accepte un
 `id_token`, un `access_token` ou un `credential` Google vérifié par le serveur
 avec `GOOGLE_CLIENT_ID` et, facultativement, les identifiants supplémentaires
@@ -66,13 +70,17 @@ utilisée par l'application mobile.
 
 ### Authentification mobile B.2
 
-Le parcours mobile démarre par la saisie du téléphone et du préfixe pays
-(la liste complète est chargée depuis `GET /api/v1/auth/countries`; si l'API
-est indisponible, un petit choix de pays courants reste proposé), envoie un code par
-`POST /api/v1/auth/request-otp`, puis vérifie le code à six chiffres par
-`POST /api/v1/auth/verify-otp`. Le JWT et le profil retournés sont conservés via
-`AuthContext` et le stockage sécurisé natif. Google Sign-In utilise
-`expo-auth-session` et transmet l'ID token à `POST /api/v1/auth/google`.
+L'inscription mobile collecte prénom(s), nom, pays/indicatif, téléphone,
+e-mail et l'acceptation des conditions et de la politique de confidentialité.
+Elle envoie un code à six chiffres par
+`POST /api/v1/auth/request-otp`, puis le valide par
+`POST /api/v1/auth/verify-otp`; la connexion n'affiche que le téléphone E.164
+ou l'e-mail comme identifiant, puis le code. Un e-mail de connexion reçoit le
+code par SMS au numéro vérifié associé. Le client tolère jusqu'à 60 secondes
+pour le réveil de l'API et affiche les erreurs en français. Le JWT et le profil
+retournés sont conservés via `AuthContext` et le stockage sécurisé natif.
+Google Sign-In utilise `@react-native-google-signin/google-signin`, configure
+le client OAuth Web et transmet l'ID token à `POST /api/v1/auth/google`.
 
 Copier `mobile/.env.example` pour la configuration locale. Configurer
 `EXPO_PUBLIC_API_URL` ainsi que les identifiants OAuth publics
@@ -84,10 +92,14 @@ via `GOOGLE_CLIENT_ID` et `GOOGLE_CLIENT_IDS`; ces valeurs OAuth publiques ne
 sont pas des secrets. L'application utilise le schéma de redirection
 `quartierplus`.
 
-Après connexion, les comptes sans nom ou quartier sont dirigés vers la
-finalisation du profil. Elle enregistre prénom/nom combinés et quartier par
-`PUT /v1/users/me`; l'écran principal n'est affiché qu'après mise à jour réussie
-du profil.
+Pour enregistrer le canal OTA, lancer manuellement le workflow
+`.github/workflows/eas-setup.yml`; il vérifie le compte `quartierplus_bf` et
+relie `preview` à la branche `preview`. Les publications passent ensuite par
+`.github/workflows/eas-update.yml` et ciblent cette branche.
+
+Après vérification OTP, un compte avec prénom et nom entre directement dans
+l'application; le quartier peut être ajouté ensuite au profil. Les comptes
+sans nom peuvent utiliser l'écran de finalisation de profil.
 
 ## Socket.IO (SOS et canaux)
 

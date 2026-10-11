@@ -20,7 +20,7 @@ Configurer comme secrets GitHub :
   manifeste Android par `app.config.js`, jamais écrite dans un fichier suivi.
 - `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` — obligatoire pour le build Android.
 - `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` — obligatoire pour l'authentification
-  Google.
+  Google; cette valeur est configurée comme `webClientId` par le SDK natif.
 - `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` — optionnel pour les builds iOS.
 - `EXPO_PUBLIC_EAS_PROJECT_ID` — optionnel; l'identifiant défini dans `app.json`
   est utilisé en son absence.
@@ -30,6 +30,13 @@ Configurer comme secrets GitHub :
 Les valeurs `EXPO_PUBLIC_*` sont intégrées au client et ne doivent donc jamais
 contenir de secret serveur. Le workflow ne transmet au prebuild et à Gradle que
 des variables dont le nom commence par `EXPO_PUBLIC_`.
+
+Pour l'identifiant OAuth Android Google, enregistrer le package
+`com.administrateur.quartierplus` et l'empreinte SHA-1 du certificat de
+signature de l'APK installé. Récupérer l'empreinte de la version réellement
+distribuée depuis `apksigner verify --print-certs`; debug et release peuvent
+avoir des empreintes différentes. L'identifiant client Web reste la valeur
+`EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` utilisée par le SDK natif.
 
 ## Secrets serveur uniquement
 
