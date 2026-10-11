@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "private": true,
+  "scripts": {
+    "test": "jest --runInBand"
+  },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^15.0.2",
     "@expo/metro-runtime": "~57.0.16",
@@ -55,6 +58,22 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.4",
+    "babel-jest": "29.7.0",
+    "jest": "29.7.0",
     "typescript": "~6.0.3"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "transform": {
+      "^.+\\.[jt]sx?$": [
+        "babel-jest",
+        {
+          "babelrc": false,
+          "configFile": false,
+          "presets": ["babel-preset-expo"]
+        }
+      ]
+    },
+    "testMatch": ["<rootDir>/src/**/*.test.js"]
   }
 }
