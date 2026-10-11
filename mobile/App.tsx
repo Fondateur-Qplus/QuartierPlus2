@@ -203,13 +203,22 @@ function RootNavigator() {
 }
 
 function VoiceAssistantLayer() {
-  const { isSessionLoading, user } = useAuth();
-  if (!user || isSessionLoading) return null;
+  const { isSessionLoading, requestAuthentication, user } = useAuth();
+  if (isSessionLoading) return null;
 
   const navigate = (command: VoiceCommand) => {
     const hasCompletedProfile =
-      typeof user.name === "string" && user.name.trim().length > 0;
-    if (!navigationRef.isReady() || !hasCompletedProfile) return false;
+      typeof user?.name === "string" && user.name.trim().length > 0;
+    if (command.requiresAuthentication && !user) {
+      requestAuthentication();
+      return true;
+    }
+    if (!navigationRef.isReady()) return false;
+    if (command.requiresAuthentication && user && !hasCompletedProfile) {
+      navigationRef.navigate("CompleteProfile");
+      return true;
+    }
+    if (!command.destination) return false;
     switch (command.destination) {
       case "CarteSOS":
         navigationRef.navigate("Main", {
@@ -233,6 +242,7 @@ function VoiceAssistantLayer() {
           params: {
             voiceRequestId: command.requestId,
             voiceContactQuery: command.contactQuery,
+            voiceChannelId: command.channelId,
           },
         });
         break;

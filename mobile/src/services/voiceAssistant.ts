@@ -1,16 +1,147 @@
 import type { MainTabParamList } from "../navigation/types";
 
 export type VoiceDestination = keyof MainTabParamList;
+export type EmergencyServiceId = "police" | "fire" | "medical";
+export type VoiceChannelId = "emergency" | "announcements";
 
 export type VoiceCommand = {
-  destination: VoiceDestination;
+  destination?: VoiceDestination;
   feedback: string;
   requestId: string;
+  emergencyService?: EmergencyServiceId;
+  channelId?: VoiceChannelId;
   searchText?: string;
   contactQuery?: string;
   openCreateListing?: boolean;
+  createAnnouncement?: boolean;
+  dictateMessage?: boolean;
+  requiresAuthentication?: boolean;
   requiresSosConfirmation?: boolean;
 };
+
+type CommandIntent =
+  | "map"
+  | "market"
+  | "messages"
+  | "profile"
+  | "home"
+  | "emergency-channel"
+  | "announcement-channel";
+
+const SIMPLE_COMMANDS: {
+  intent: CommandIntent;
+  aliases: string[];
+}[] = [
+  {
+    intent: "emergency-channel",
+    aliases: [
+      "canal urgences",
+      "canal urgence",
+      "urgences",
+      "ouvrir les urgences",
+      "ouvrir le canal urgences",
+      "canal emergency",
+      "emergency channel",
+      "channel emergency",
+      "open emergency channel",
+    ],
+  },
+  {
+    intent: "announcement-channel",
+    aliases: [
+      "canal annonces",
+      "canal annonce",
+      "ouvrir les annonces",
+      "ouvrir le canal annonces",
+      "informations du quartier",
+      "announcements channel",
+      "announcement channel",
+      "channel announcements",
+      "open announcements",
+    ],
+  },
+  {
+    intent: "map",
+    aliases: [
+      "carte",
+      "carte sos",
+      "ouvrir la carte",
+      "ouvre la carte",
+      "map",
+      "open map",
+    ],
+  },
+  {
+    intent: "market",
+    aliases: [
+      "marche",
+      "marketplace",
+      "boutique",
+      "ouvrir le marche",
+      "ouvre le marche",
+      "open marketplace",
+    ],
+  },
+  {
+    intent: "messages",
+    aliases: [
+      "messages",
+      "message",
+      "conversations",
+      "discuter",
+      "ouvrir les messages",
+      "open messages",
+    ],
+  },
+  {
+    intent: "profile",
+    aliases: [
+      "profil",
+      "mon profil",
+      "ouvrir le profil",
+      "mes contacts",
+      "profile",
+      "open profile",
+    ],
+  },
+  {
+    intent: "home",
+    aliases: [
+      "accueil",
+      "fil",
+      "actualites",
+      "ouvrir l accueil",
+      "home",
+      "open home",
+    ],
+  },
+];
+
+export const VOICE_COMMAND_EXAMPLES = [
+  "Ouvrir la carte",
+  "Canal Urgences",
+  "Appeler les secours",
+] as const;
+
+export const VOICE_CONTEXTUAL_STRINGS = [
+  "QuartierPlus",
+  "Marché",
+  "annonce",
+  "messages",
+  "contact",
+  "SOS",
+  "Talkie-Walkie",
+  "Grin",
+  "profil",
+  "urgences",
+  "pompiers",
+  "ambulance",
+  "emergency",
+  "marketplace",
+  "announcement",
+  "police",
+  "firefighters",
+];
 
 const normalizeSpeech = (text: string) =>
   text
@@ -22,44 +153,252 @@ const normalizeSpeech = (text: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+const editDistance = (left: string, right: string) => {
+  const previous = Array.from({ length: right.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= left.length; i += 1) {
+    let diagonal = previous[0];
+    previous[0] = i;
+    for (let j = 1; j <= right.length; j += 1) {
+      const above = previous[j];
+      previous[j] = Math.min(
+        previous[j] + 1,
+        previous[j - 1] + 1,
+        diagonal + (left[i - 1] === right[j - 1] ? 0 : 1),
+      );
+      diagonal = above;
+    }
+  }
+  return previous[right.length];
+};
+
+const isCloseWord = (word: string, candidate: string) => {
+  if (word === candidate) return true;
+  if (Math.min(word.length, candidate.length) < 4) return false;
+  const maxDistance = Math.min(word.length, candidate.length) >= 7 ? 2 : 1;
+  return editDistance(word, candidate) <= maxDistance;
+};
+
+const matchesTerm = (phrase: string, term: string) => {
+  if (phrase.includes(term)) return true;
+  const words = phrase.split(" ");
+  const terms = term.split(" ");
+  if (terms.length === 1) {
+    return words.some((word) => isCloseWord(word, term));
+  }
+  return words.some((_, index) => {
+    const candidate = words.slice(index, index + terms.length);
+    return (
+      candidate.length === terms.length &&
+      candidate.every((word, termIndex) => isCloseWord(word, terms[termIndex]))
+    );
+  });
+};
+
+const hasAnyTerm = (phrase: string, terms: string[]) =>
+  terms.some((term) => matchesTerm(phrase, term));
+
+const matchesAlias = (phrase: string, alias: string) => {
+  if (phrase === alias || phrase.includes(alias)) return true;
+  return matchesTerm(phrase, alias);
+};
+
+const makeCommand = (
+  destination: VoiceDestination,
+  feedback: string,
+  options: Omit<VoiceCommand, "destination" | "feedback" | "requestId"> = {},
+): VoiceCommand => ({
+  destination,
+  feedback,
+  requestId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  ...options,
+});
+
 const removeLeadingArticle = (text: string) =>
   text.replace(/^(?:un|une|des|le|la|les)\s+/, "");
 
-const createRequestId = () =>
-  `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+export function isVoiceConfirmation(transcript: string) {
+  return /^(?:(?:oui|yes)\s+)?(?:confirmer?|confirm)$/.test(
+    normalizeSpeech(transcript),
+  );
+}
+
+export function isVoiceCancellation(transcript: string) {
+  return /^(?:(?:non|no)\s+)?(?:annuler|annule|cancel|stop)$/.test(
+    normalizeSpeech(transcript),
+  );
+}
 
 export function parseVoiceCommand(transcript: string): VoiceCommand | null {
   const phrase = normalizeSpeech(transcript);
   if (!phrase) return null;
-  const requestId = createRequestId();
 
   if (
-    /\b(sos|urgence|au secours|alerte d urgence)\b/.test(phrase) &&
-    /\b(pas|annule|annuler|arrete|stop)\b/.test(phrase)
+    hasAnyTerm(phrase, [
+      "sos",
+      "au secours",
+      "alerte d urgence",
+      "emergency alert",
+    ]) &&
+    hasAnyTerm(phrase, ["pas", "annule", "annuler", "arrete", "stop", "cancel"])
   ) {
     return null;
   }
 
-  if (/\b(sos|urgence|au secours|alerte d urgence)\b/.test(phrase)) {
+  if (
+    hasAnyTerm(phrase, [
+      "lancer",
+      "envoyer",
+      "declencher",
+      "demander",
+      "launch",
+      "send",
+      "trigger",
+    ]) &&
+    hasAnyTerm(phrase, [
+      "sos",
+      "alerte",
+      "au secours",
+      "urgence",
+      "emergency alert",
+    ]) &&
+    !hasAnyTerm(phrase, [
+      "appeler",
+      "appelle",
+      "telephoner",
+      "composer",
+      "call",
+      "dial",
+    ])
+  ) {
+    return makeCommand(
+      "CarteSOS",
+      "Lancer une demande SOS ? L’alerte ne sera envoyée qu’après confirmation et compte à rebours.",
+      { requiresSosConfirmation: true, requiresAuthentication: true },
+    );
+  }
+
+  if (
+    phrase === "au secours" &&
+    !hasAnyTerm(phrase, ["appeler", "appelle", "telephoner", "composer", "call"])
+  ) {
+    return makeCommand(
+      "CarteSOS",
+      "Lancer une demande SOS ? L’alerte ne sera envoyée qu’après confirmation et compte à rebours.",
+      { requiresSosConfirmation: true, requiresAuthentication: true },
+    );
+  }
+
+  const isEmergencyCall = hasAnyTerm(phrase, [
+    "appeler",
+    "appelle",
+    "telephoner",
+    "composer",
+    "joindre",
+    "appeler les secours",
+    "call",
+    "dial",
+    "phone",
+  ]);
+  const emergencyService = hasAnyTerm(phrase, ["police", "gendarmerie"])
+    ? "police"
+    : hasAnyTerm(phrase, [
+          "pompiers",
+          "incendie",
+          "feu",
+          "fire",
+          "firefighters",
+        ])
+      ? "fire"
+      : "medical";
+  if (
+    isEmergencyCall &&
+    hasAnyTerm(phrase, [
+      "secours",
+      "urgence",
+      "police",
+      "gendarmerie",
+      "pompiers",
+      "incendie",
+      "ambulance",
+      "samu",
+      "medical",
+      "emergency services",
+      "fire",
+      "firefighters",
+    ])
+  ) {
     return {
-      destination: "CarteSOS",
-      feedback:
-        "Ouvrir le panneau SOS ? L’alerte ne sera envoyée qu’après confirmation dans l’écran SOS.",
-      requestId,
-      requiresSosConfirmation: true,
+      feedback: "J’ouvre le téléphone pour appeler les secours.",
+      requestId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      emergencyService,
     };
   }
 
   if (
-    /\b(publier|creer|ajouter)\b/.test(phrase) &&
-    /\b(annonce|produit|service)\b/.test(phrase)
+    hasAnyTerm(phrase, [
+      "publier",
+      "creer",
+      "rediger",
+      "poster",
+      "publish",
+      "post",
+      "create",
+    ]) &&
+    hasAnyTerm(phrase, [
+      "dans le canal annonces",
+      "sur le canal annonces",
+      "in the announcements channel",
+    ])
   ) {
-    return {
-      destination: "Marche",
-      feedback: "J’ouvre le formulaire de publication. Vérifiez les détails avant de publier.",
-      requestId,
-      openCreateListing: true,
-    };
+    return makeCommand(
+      "Messages",
+      "J’ouvre le canal Annonces. Vérifiez votre message avant de l’envoyer.",
+      {
+        channelId: "announcements",
+        createAnnouncement: true,
+        requiresAuthentication: true,
+      },
+    );
+  }
+
+  if (
+    hasAnyTerm(phrase, ["creer", "rediger", "create", "write"]) &&
+    hasAnyTerm(phrase, ["announcement", "announcements"])
+  ) {
+    return makeCommand(
+      "Messages",
+      "J’ouvre le canal Annonces. Vérifiez votre message avant de l’envoyer.",
+      {
+        channelId: "announcements",
+        createAnnouncement: true,
+        requiresAuthentication: true,
+      },
+    );
+  }
+
+  if (
+    hasAnyTerm(phrase, [
+      "publier",
+      "creer",
+      "ajouter",
+      "vendre",
+      "publish",
+      "create",
+      "sell",
+    ]) &&
+    hasAnyTerm(phrase, [
+      "annonce",
+      "produit",
+      "service",
+      "listing",
+      "ad",
+    ])
+  ) {
+    return makeCommand(
+      "Marche",
+      "J’ouvre le formulaire de publication. Vérifiez les détails avant de publier.",
+      { openCreateListing: true, requiresAuthentication: true },
+    );
   }
 
   const contactQuery = phrase.match(
@@ -71,93 +410,88 @@ export function parseVoiceCommand(transcript: string): VoiceCommand | null {
       /(?:envoyer|ecrire|rediger)\s+(?:un\s+)?message\s+(?:a|avec|pour)\s+(.+)/,
     )?.[1]?.trim();
   if (contactQuery !== undefined || requestedContact !== undefined) {
-    return {
-      destination: "Messages",
-      feedback: requestedContact
+    return makeCommand(
+      "Messages",
+      requestedContact
         ? `Je recherche ${requestedContact} dans vos conversations.`
         : "J’ouvre vos conversations privées.",
-      requestId,
-      contactQuery: requestedContact,
-    };
+      {
+        contactQuery: requestedContact,
+        requiresAuthentication: true,
+      },
+    );
+  }
+
+  if (
+    hasAnyTerm(phrase, [
+      "dicter un message",
+      "ecrire un message vocal",
+      "dictate a message",
+      "write a message",
+    ])
+  ) {
+    return makeCommand(
+      "Messages",
+      "Choisissez une conversation, puis utilisez le microphone dans le champ du message.",
+      { dictateMessage: true, requiresAuthentication: true },
+    );
   }
 
   const listingQuery = phrase.match(
     /(?:rechercher|chercher|trouver|trouve)\s+(?:une?\s+)?(?:annonce|annonces|article|articles)\s*(?:pour|sur|de|:)?\s*(.*)/,
   )?.[1]?.trim();
   if (listingQuery !== undefined) {
-    return {
-      destination: "Marche",
-      feedback: listingQuery
+    return makeCommand(
+      "Marche",
+      listingQuery
         ? `Je recherche ${listingQuery} dans les annonces.`
         : "J’ouvre la recherche des annonces.",
-      requestId,
-      searchText: removeLeadingArticle(listingQuery),
-    };
+      { searchText: removeLeadingArticle(listingQuery) },
+    );
   }
 
-  if (/\b(talkie|talkie walkie|walkie talkie|radio)\b/.test(phrase)) {
-    return {
-      destination: "Talkie",
-      feedback: "J’ouvre le Talkie-Walkie. La transmission reste à activer dans l’écran.",
-      requestId,
-    };
+  if (hasAnyTerm(phrase, ["talkie", "talkie walkie", "walkie talkie", "radio"])) {
+    return makeCommand(
+      "Talkie",
+      "J’ouvre le Talkie-Walkie. La transmission reste à activer dans l’écran.",
+    );
   }
 
-  if (/\b(grin|video|rencontre video)\b/.test(phrase)) {
-    return {
-      destination: "Grin",
-      feedback: "J’ouvre le Grin.",
-      requestId,
-    };
+  if (hasAnyTerm(phrase, ["grin", "video", "rencontre video"])) {
+    return makeCommand("Grin", "J’ouvre le Grin.");
   }
 
-  if (/\b(profil|mes contacts|contact sos)\b/.test(phrase)) {
-    return {
-      destination: "Profil",
-      feedback: "J’ouvre votre profil et vos contacts.",
-      requestId,
-    };
+  const intent = SIMPLE_COMMANDS.find(({ aliases }) =>
+    aliases.some((alias) => matchesAlias(phrase, alias)),
+  )?.intent;
+  switch (intent) {
+    case "emergency-channel":
+      return makeCommand("Messages", "J’ouvre le canal Urgences.", {
+        channelId: "emergency",
+      });
+    case "announcement-channel":
+      return makeCommand("Messages", "J’ouvre le canal Annonces.", {
+        channelId: "announcements",
+      });
+    case "profile":
+      return makeCommand("Profil", "J’ouvre votre profil et vos contacts.");
+    case "messages":
+      return makeCommand(
+        "Messages",
+        "J’ouvre vos messages. Choisissez une conversation avant l’envoi.",
+      );
+    case "market":
+      return makeCommand("Marche", "J’ouvre le Marché.");
+    case "map":
+      return makeCommand("CarteSOS", "J’ouvre la carte SOS.");
+    case "home":
+      return makeCommand("Accueil", "J’ouvre l’accueil.");
+    default:
+      return null;
   }
-
-  if (/\b(message|messages|conversation|conversations|discuter)\b/.test(phrase)) {
-    return {
-      destination: "Messages",
-      feedback: "J’ouvre vos messages. Choisissez une conversation avant l’envoi.",
-      requestId,
-    };
-  }
-
-  if (/\b(marche|marketplace|annonce|annonces|boutique)\b/.test(phrase)) {
-    return {
-      destination: "Marche",
-      feedback: "J’ouvre le Marché.",
-      requestId,
-    };
-  }
-
-  if (/\b(carte|carte sos|map)\b/.test(phrase)) {
-    return {
-      destination: "CarteSOS",
-      feedback: "J’ouvre la carte SOS.",
-      requestId,
-    };
-  }
-
-  if (/\b(accueil|fil|actualites|actualite)\b/.test(phrase)) {
-    return {
-      destination: "Accueil",
-      feedback: "J’ouvre l’accueil.",
-      requestId,
-    };
-  }
-
-  return null;
 }
 
-export function speechErrorMessage(
-  error: string,
-  isOffline: boolean,
-): string {
+export function speechErrorMessage(error: string, isOffline: boolean): string {
   if (error === "not-allowed") {
     return "L’accès au microphone ou à la reconnaissance vocale a été refusé. Autorisez-le dans les réglages de l’appareil.";
   }
@@ -175,15 +509,3 @@ export function speechErrorMessage(
   }
   return "La reconnaissance vocale a échoué. Réessayez ou utilisez le clavier.";
 }
-
-export const VOICE_CONTEXTUAL_STRINGS = [
-  "QuartierPlus",
-  "Marché",
-  "annonce",
-  "messages",
-  "contact",
-  "SOS",
-  "Talkie-Walkie",
-  "Grin",
-  "profil",
-];

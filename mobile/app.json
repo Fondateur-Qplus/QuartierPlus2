@@ -47,7 +47,7 @@
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "QuartierPlus utilise le microphone pour la dictée vocale, le talkie-walkie et les échanges vidéo du Grin.",
+          "microphonePermission": "QuartierPlus utilise le microphone uniquement après votre action pour la dictée vocale, le talkie-walkie et les échanges vidéo du Grin. L’application ne stocke ni n’envoie l’audio.",
           "speechRecognitionPermission": "QuartierPlus convertit votre voix en texte pour dicter et naviguer dans l’application."
         }
       ],

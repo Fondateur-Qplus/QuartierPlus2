@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Pressable,
+  StyleSheet,
   TextInput,
   type TextInputProps,
+  View,
 } from "react-native";
+import { Mic } from "lucide-react-native";
 import { useVoiceAssistant } from "../context/VoiceAssistantContext";
 
 export default function VoiceTextInput(props: TextInputProps) {
-  const { registerInput } = useVoiceAssistant();
+  const {
+    recognitionAvailable,
+    registerInput,
+    requestDictation,
+  } = useVoiceAssistant();
   const inputValueRef = useRef(props.value ?? props.defaultValue ?? "");
   const [uncontrolledValue, setUncontrolledValue] = useState(
     props.defaultValue ?? "",
@@ -53,12 +61,50 @@ export default function VoiceTextInput(props: TextInputProps) {
     [],
   );
 
+  const flattenedStyle = StyleSheet.flatten(props.style);
+  const { width, ...textStyle } = flattenedStyle ?? {};
+
   return (
-    <TextInput
-      {...props}
-      onChangeText={handleChangeText}
-      onFocus={handleFocus}
-      value={isControlled ? props.value : uncontrolledValue}
-    />
+    <View style={[styles.container, width ? { width } : null]}>
+      <TextInput
+        {...props}
+        onChangeText={handleChangeText}
+        onFocus={handleFocus}
+        style={[textStyle, styles.input]}
+        value={isControlled ? props.value : uncontrolledValue}
+      />
+      {recognitionAvailable ? (
+        <Pressable
+          accessibilityLabel="Dicter dans ce champ"
+          accessibilityRole="button"
+          onPress={requestDictation}
+          style={styles.dictationButton}
+        >
+          <Mic color="#2563eb" size={18} />
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    alignItems: "center",
+    alignSelf: "stretch",
+    flexDirection: "row",
+    minWidth: 0,
+  },
+  input: {
+    flex: 1,
+    minWidth: 0,
+  },
+  dictationButton: {
+    alignItems: "center",
+    backgroundColor: "#eff6ff",
+    borderRadius: 10,
+    justifyContent: "center",
+    marginLeft: 8,
+    minHeight: 40,
+    minWidth: 40,
+  },
+});

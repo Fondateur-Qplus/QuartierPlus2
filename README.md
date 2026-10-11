@@ -347,29 +347,40 @@ client et ne sont pas encore montées dans le serveur Express présent dans ce
 dépôt. Tant qu'elles ne sont pas déployées, le fil affiche une erreur explicite
 et conserve les données déjà mises en cache.
 
-## Assistant vocal global C.2
+## Assistant vocal global C.2 — Écran 4
 
-Sur les écrans authentifiés, le bouton microphone flottant ouvre l'assistant
-vocal. La dictée française peut remplir les champs texte actifs du profil, des
-messages privés et de leurs signalements, du Marché et de ses signalements,
-ainsi que les commentaires. Les champs de téléphone, prix et codes OTP restent
-saisis au clavier pour éviter les erreurs de reconnaissance sur des données
-numériques sensibles.
+Le bouton microphone flottant ouvre l'assistant sur les écrans invités et
+authentifiés. Un bouton microphone est également disponible dans les champs de
+messages, annonces, profil et recherche. Chaque activation lance une seule
+reconnaissance (aucune écoute continue). Au premier usage, un écran explique la
+permission avant la demande système. Si la reconnaissance n'est pas disponible,
+les microphones sont masqués et l'application affiche « Reconnaissance vocale
+indisponible ».
 
-Les commandes vocales locales ouvrent l'accueil, la carte SOS, le Marché, les
-messages, le Talkie-Walkie, le Grin ou le profil. La recherche vocale filtre les
-annonces et conversations disponibles. « Publier une annonce » ouvre le
-formulaire sans publier automatiquement. Une commande SOS demande confirmation,
-puis ouvre le panneau SOS; l'envoi nécessite encore le choix du type d'urgence
-et la confirmation avec compte à rebours. Le retour vocal utilise la synthèse
-française du système.
+La reconnaissance native utilise la langue enregistrée dans les préférences
+(fr-FR par défaut, en-US pour l'application en anglais) et `expo-speech` lit les
+réponses. Les commandes locales ouvrent la carte, le Marché, les canaux
+URGENCES/ANNONCES, le profil et les messages, proposent la dictée, ou ouvrent
+les formulaires d'annonce sans publier. Un appel aux secours officiels ouvre le
+composeur du téléphone avec les numéros du pays sélectionné et ne requiert pas
+de compte. Une commande inconnue propose des exemples reconnus.
 
-La reconnaissance fonctionne sur iOS/Android et sur les navigateurs prenant en
-charge Web Speech. La compilation native doit être régénérée (development
-build/EAS, pas Expo Go) pour embarquer `expo-speech-recognition` et ses
-permissions microphone/reconnaissance. Hors ligne, la dictée exige un modèle
-français installé sur l'appareil; les commandes de navigation restent locales,
-et les recherches ne voient que les résultats déjà chargés.
+« Lancer un SOS » exige une seconde confirmation vocale (« confirmer ») ou une
+action explicite dans l'assistant, puis un compte à rebours annulable. L'écran
+SOS conserve sa confirmation et son compte à rebours de publication. Toute
+action protégée en mode invité propose la connexion.
+
+L'audio n'est ni stocké ni envoyé à QuartierPlus; le système de reconnaissance
+du téléphone peut traiter la voix. Le texte reconnu n'est pas écrit dans les
+journaux ni dans Crashlytics. Le microphone n'est actif que pendant une
+activation ponctuelle et son état est affiché. La compilation native Android
+doit être régénérée (APK/EAS, pas Expo Go ni OTA) pour embarquer
+`expo-speech-recognition` et `RECORD_AUDIO`. Hors ligne, la dictée nécessite un
+modèle de langue installé; les commandes restent locales.
+
+Les intentions et synonymes testés sont dans
+[`mobile/src/services/voiceAssistant.ts`](./mobile/src/services/voiceAssistant.ts);
+voir aussi le [cahier vocal](./docs/VOICE_ASSISTANT.md).
 
 ## Billetterie anti-fraude D.4
 

@@ -3,6 +3,7 @@ import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
 } from "expo-speech-recognition";
+import * as SecureStore from "expo-secure-store";
 import { Mic, MicOff, X } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -15,12 +16,21 @@ import {
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { useVoiceAssistant } from "../context/VoiceAssistantContext";
+import { callOfficialEmergencyService } from "../services/emergencyServices";
+import { openProfileStore } from "../storage/profileStore";
 import {
+  isVoiceCancellation,
+  isVoiceConfirmation,
   parseVoiceCommand,
   speechErrorMessage,
   VOICE_CONTEXTUAL_STRINGS,
+  VOICE_COMMAND_EXAMPLES,
   type VoiceCommand,
 } from "../services/voiceAssistant";
+
+const PERMISSION_EXPLANATION_KEY = "quartierplus.voice-permission-explained";
+const PERMISSION_REQUESTED_KEY = "quartierplus.voice-permission-requested";
+const SOS_CONFIRMATION_SECONDS = 5;
 
 type VoiceAssistantModalProps = {
   onNavigate: (command: VoiceCommand) => boolean;
@@ -29,10 +39,19 @@ type VoiceAssistantModalProps = {
 export default function VoiceAssistantModal({
   onNavigate,
 }: VoiceAssistantModalProps) {
-  const { isOffline } = useAuth();
-  const { clearActiveInput, insertIntoFocusedInput } = useVoiceAssistant();
+  const { isOffline, user } = useAuth();
+  const {
+    clearActiveInput,
+    insertIntoFocusedInput,
+    recognitionAvailable,
+    registerDictationHandler,
+    setRecognitionAvailable,
+  } = useVoiceAssistant();
   const [isVisible, setIsVisible] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [permissionExplanationVisible, setPermissionExplanationVisible] =
+    useState(false);
+  const [sosCountdown, setSosCountdown] = useState<number | null>(null);
   const [transcript, setTranscript] = useState("");
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
@@ -45,6 +64,24 @@ export default function VoiceAssistantModal({
   ]).current;
   const startRequestRef = useRef(0);
   const isVisibleRef = useRef(false);
+  const dictationOnlyRef = useRef(false);
+  const pendingSosCommandRef = useRef<VoiceCommand | null>(null);
+  const sosTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const speechLanguageRef = useRef("fr-FR");
+
+  useEffect(() => {
+    setRecognitionAvailable(
+      ExpoSpeechRecognitionModule.isRecognitionAvailable(),
+    );
+  }, [setRecognitionAvailable]);
+
+  useEffect(
+    () =>
+      registerDictationHandler(() => {
+        void startListening("dictation");
+      }),
+    [registerDictationHandler],
+  );
 
   useSpeechRecognitionEvent("start", () => {
     if (!isVisibleRef.current) return;
@@ -99,6 +136,7 @@ export default function VoiceAssistantModal({
   useEffect(
     () => () => {
       startRequestRef.current += 1;
+      if (sosTimerRef.current) clearInterval(sosTimerRef.current);
       if (isVisibleRef.current) ExpoSpeechRecognitionModule.abort();
       Speech.stop();
     },
@@ -108,7 +146,7 @@ export default function VoiceAssistantModal({
   function speak(text: string) {
     Speech.stop();
     Speech.speak(text, {
-      language: "fr-FR",
+      language: speechLanguageRef.current,
       onError: () => {
         if (isVisibleRef.current) {
           setError("La synthèse vocale n’est pas disponible sur cet appareil.");
@@ -119,12 +157,45 @@ export default function VoiceAssistantModal({
   }
 
   function processTranscript(text: string) {
-    const command = parseVoiceCommand(text);
+    const pendingSos = pendingSosCommandRef.current;
+    if (pendingSos) {
+      if (isVoiceCancellation(text)) {
+        cancelSosConfirmation();
+      } else if (isVoiceConfirmation(text)) {
+        beginSosCountdown();
+      } else {
+        const result =
+          "Pour continuer, dites « confirmer » ou appuyez sur Confirmer. Dites « annuler » pour arrêter.";
+        setFeedback(result);
+        speak(result);
+      }
+      return;
+    }
+
+    const command = dictationOnlyRef.current ? null : parseVoiceCommand(text);
     if (command) {
       if (command.requiresSosConfirmation) {
+        pendingSosCommandRef.current = command;
         setPendingSosCommand(command);
         setFeedback(command.feedback);
         speak(command.feedback);
+        return;
+      }
+      if (command.emergencyService) {
+        void callOfficialEmergencyService(command.emergencyService)
+          .then(() => {
+            const result =
+              "Le téléphone est prêt. Confirmez l’appel dans l’application Téléphone.";
+            setFeedback(result);
+            speak(result);
+          })
+          .catch(() => {
+            const result =
+              "Impossible d’ouvrir l’appel. Vérifiez le numéro d’urgence du pays dans votre profil.";
+            setError(result);
+            setFeedback(result);
+            speak(result);
+          });
         return;
       }
       if (isOffline && (command.searchText || command.contactQuery)) {
@@ -132,7 +203,23 @@ export default function VoiceAssistantModal({
       }
       if (!onNavigate(command)) {
         const result =
-          "Finalisez votre profil avant d’utiliser la navigation vocale.";
+          "Connectez-vous ou finalisez votre profil avant d’utiliser cette action.";
+        setFeedback(result);
+        speak(result);
+        return;
+      }
+      if (command.requiresAuthentication && !user) {
+        const result = "Connectez-vous pour continuer cette action.";
+        setFeedback(result);
+        speak(result);
+        return;
+      }
+      if (
+        command.requiresAuthentication &&
+        user &&
+        (typeof user.name !== "string" || !user.name.trim())
+      ) {
+        const result = "Finalisez votre profil pour continuer cette action.";
         setFeedback(result);
         speak(result);
         return;
@@ -146,36 +233,88 @@ export default function VoiceAssistantModal({
     const inserted = insertIntoFocusedInput(text);
     const result = inserted
       ? "Dictée ajoutée au champ sélectionné."
-      : "J’ai compris votre dictée. Sélectionnez un champ de saisie pour y insérer le texte.";
+      : `Commande inconnue. Essayez : ${VOICE_COMMAND_EXAMPLES.join(", ")}.`;
     setFeedback(result);
     speak(result);
   }
 
-  async function startListening() {
+  async function startListening(mode: "command" | "dictation" = "command") {
+    if (recognitionAvailable !== true) return;
     const requestId = ++startRequestRef.current;
+    dictationOnlyRef.current = mode === "dictation";
     isVisibleRef.current = true;
     setError("");
     setTranscript("");
     setFeedback("");
-    setPendingSosCommand(null);
     setIsVisible(true);
 
     try {
-      if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
-        throw new Error(
-          "La reconnaissance vocale n’est pas disponible sur cet appareil.",
-        );
+      const profileStore = await openProfileStore();
+      const preferences = await profileStore.getPreferences();
+      if (requestId !== startRequestRef.current) return;
+      speechLanguageRef.current =
+        preferences.language === "en" ? "en-US" : "fr-FR";
+
+      const explanationSeen = await SecureStore.getItemAsync(
+        PERMISSION_EXPLANATION_KEY,
+      );
+      if (requestId !== startRequestRef.current) return;
+      if (explanationSeen !== "true") {
+        setPermissionExplanationVisible(true);
+        return;
       }
 
-      const permission =
-        await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      await beginListening(requestId);
+    } catch {
+      if (requestId !== startRequestRef.current) return;
+      const message = "Impossible de préparer la permission du microphone.";
+      setError(message);
+      setFeedback(message);
+    }
+  }
+
+  async function continueAfterPermissionExplanation() {
+    setPermissionExplanationVisible(false);
+    const requestId = startRequestRef.current;
+    try {
+      await SecureStore.setItemAsync(PERMISSION_EXPLANATION_KEY, "true");
+      if (requestId !== startRequestRef.current) return;
+      await beginListening(requestId, speechLanguageRef.current);
+    } catch {
+      const message = "Impossible d’enregistrer votre choix de confidentialité.";
+      setError(message);
+      setFeedback(message);
+    }
+  }
+
+  async function beginListening(
+    requestId: number,
+    language = speechLanguageRef.current,
+  ) {
+    try {
+      const currentPermission =
+        await ExpoSpeechRecognitionModule.getPermissionsAsync();
+      if (requestId !== startRequestRef.current) return;
+      let permission = currentPermission;
+      if (!permission.granted) {
+        const requestAlreadyMade = await SecureStore.getItemAsync(
+          PERMISSION_REQUESTED_KEY,
+        );
+        if (requestId !== startRequestRef.current) return;
+        if (requestAlreadyMade === "true") {
+          throw new Error(speechErrorMessage("not-allowed", isOffline));
+        }
+        await SecureStore.setItemAsync(PERMISSION_REQUESTED_KEY, "true");
+        if (requestId !== startRequestRef.current) return;
+        permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      }
       if (requestId !== startRequestRef.current) return;
       if (!permission.granted) {
         throw new Error(speechErrorMessage("not-allowed", isOffline));
       }
 
       const options = {
-        lang: "fr-FR",
+        lang: language,
         interimResults: true,
         continuous: false,
         addsPunctuation: true,
@@ -189,7 +328,10 @@ export default function VoiceAssistantModal({
         const locales = await ExpoSpeechRecognitionModule.getSupportedLocales({});
         if (requestId !== startRequestRef.current) return;
         const hasOfflineFrench = locales.installedLocales.some(
-          (locale) => locale.toLocaleLowerCase().startsWith("fr"),
+          (locale) =>
+            locale
+              .toLocaleLowerCase()
+              .startsWith(language.slice(0, 2).toLowerCase()),
         );
         if (!hasOfflineFrench) {
           throw new Error(speechErrorMessage("service-not-allowed", true));
@@ -223,22 +365,72 @@ export default function VoiceAssistantModal({
 
   function close() {
     startRequestRef.current += 1;
+    if (sosTimerRef.current) clearInterval(sosTimerRef.current);
+    sosTimerRef.current = null;
     isVisibleRef.current = false;
     ExpoSpeechRecognitionModule.abort();
     Speech.stop();
     clearActiveInput();
     setIsListening(false);
     setIsVisible(false);
+    setPermissionExplanationVisible(false);
+    setSosCountdown(null);
+    pendingSosCommandRef.current = null;
     setPendingSosCommand(null);
   }
 
   function confirmSos() {
-    if (!pendingSosCommand) return;
-    const command = pendingSosCommand;
+    beginSosCountdown();
+  }
+
+  function beginSosCountdown() {
+    if (!pendingSosCommandRef.current || sosTimerRef.current) return;
+    let remaining = SOS_CONFIRMATION_SECONDS;
+    setSosCountdown(remaining);
+    sosTimerRef.current = setInterval(() => {
+      remaining -= 1;
+      if (remaining > 0) {
+        setSosCountdown(remaining);
+        return;
+      }
+      if (sosTimerRef.current) clearInterval(sosTimerRef.current);
+      sosTimerRef.current = null;
+      setSosCountdown(null);
+      void openConfirmedSos();
+    }, 1000);
+  }
+
+  function cancelSosConfirmation() {
+    if (sosTimerRef.current) clearInterval(sosTimerRef.current);
+    sosTimerRef.current = null;
+    setSosCountdown(null);
+    pendingSosCommandRef.current = null;
+    setPendingSosCommand(null);
+    const result = "Demande SOS annulée.";
+    setFeedback(result);
+    speak(result);
+  }
+
+  async function openConfirmedSos() {
+    const command = pendingSosCommandRef.current;
+    if (!command) return;
+    pendingSosCommandRef.current = null;
     setPendingSosCommand(null);
     if (!onNavigate(command)) {
       const result =
-        "Finalisez votre profil avant d’ouvrir les commandes SOS.";
+        "Connectez-vous ou finalisez votre profil pour lancer une alerte SOS.";
+      setFeedback(result);
+      speak(result);
+      return;
+    }
+    if (!user) {
+      const result = "Connectez-vous pour lancer une alerte SOS.";
+      setFeedback(result);
+      speak(result);
+      return;
+    }
+    if (typeof user.name !== "string" || !user.name.trim()) {
+      const result = "Finalisez votre profil pour lancer une alerte SOS.";
       setFeedback(result);
       speak(result);
       return;
@@ -249,17 +441,30 @@ export default function VoiceAssistantModal({
     speak(confirmation);
   }
 
+  if (recognitionAvailable === false) {
+    return (
+      <Text accessibilityLiveRegion="polite" style={styles.unavailable}>
+        Reconnaissance vocale indisponible
+      </Text>
+    );
+  }
+
   return (
     <>
-      <Pressable
-        accessibilityLabel="Ouvrir l’assistant vocal"
-        accessibilityHint="Dicter du texte ou exécuter une commande vocale."
-        accessibilityRole="button"
-        onPress={() => void startListening()}
-        style={styles.floatingButton}
-      >
-        <Mic color="#ffffff" size={22} />
-      </Pressable>
+      {recognitionAvailable ? (
+        <Pressable
+          accessibilityLabel="Ouvrir l’assistant vocal"
+          accessibilityHint="Dicter du texte ou exécuter une commande vocale."
+          accessibilityRole="button"
+          onPress={() => void startListening()}
+          style={[
+            styles.floatingButton,
+            isListening && styles.floatingButtonActive,
+          ]}
+        >
+          <Mic color="#ffffff" size={22} />
+        </Pressable>
+      ) : null}
 
       <Modal
         animationType="fade"
@@ -270,6 +475,35 @@ export default function VoiceAssistantModal({
       >
         <View style={styles.backdrop}>
           <View accessibilityViewIsModal style={styles.dialog}>
+            {permissionExplanationVisible ? (
+              <>
+                <Text style={styles.title}>Avant d’activer le microphone</Text>
+                <Text style={styles.confirmationText}>
+                  QuartierPlus utilise la reconnaissance vocale du téléphone
+                  uniquement après votre action. L’application ne stocke pas
+                  l’audio et ne l’envoie pas à QuartierPlus. L’accès au
+                  microphone est demandé au premier usage; si vous le refusez,
+                  vous pourrez l’autoriser dans les réglages de l’appareil.
+                </Text>
+                <View style={styles.confirmationActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={close}
+                    style={styles.cancelButton}
+                  >
+                    <Text style={styles.cancelButtonText}>Annuler</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void continueAfterPermissionExplanation()}
+                    style={styles.confirmButton}
+                  >
+                    <Text style={styles.confirmButtonText}>Continuer</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              <>
             <View style={styles.header}>
               <View style={styles.titleGroup}>
                 <Text style={styles.title}>Assistant vocal</Text>
@@ -344,15 +578,19 @@ export default function VoiceAssistantModal({
 
             {pendingSosCommand ? (
               <View style={styles.confirmationPanel}>
-                <Text style={styles.confirmationTitle}>Confirmer l’accès SOS</Text>
+                <Text style={styles.confirmationTitle}>
+                  {sosCountdown === null
+                    ? "Confirmer le lancement SOS"
+                    : `Lancement dans ${sosCountdown} seconde${sosCountdown === 1 ? "" : "s"}`}
+                </Text>
                 <Text style={styles.confirmationText}>
-                  Cela ouvre les commandes d’urgence. L’alerte ne partira pas sans
-                  une autre confirmation.
+                  L’alerte ne part qu’après ce compte à rebours annulable et la
+                  confirmation finale dans l’écran SOS.
                 </Text>
                 <View style={styles.confirmationActions}>
                   <Pressable
                     accessibilityRole="button"
-                    onPress={() => setPendingSosCommand(null)}
+                    onPress={cancelSosConfirmation}
                     style={styles.cancelButton}
                   >
                     <Text style={styles.cancelButtonText}>Annuler</Text>
@@ -362,7 +600,9 @@ export default function VoiceAssistantModal({
                     onPress={confirmSos}
                     style={styles.confirmButton}
                   >
-                    <Text style={styles.confirmButtonText}>Ouvrir SOS</Text>
+                    <Text style={styles.confirmButtonText}>
+                      {sosCountdown === null ? "Confirmer" : "Confirmer"}
+                    </Text>
                   </Pressable>
                 </View>
               </View>
@@ -377,7 +617,9 @@ export default function VoiceAssistantModal({
               <Pressable
                 accessibilityRole="button"
                 onPress={
-                  isListening ? stopListening : () => void startListening()
+                  isListening
+                    ? stopListening
+                    : () => void startListening("command")
                 }
                 style={[
                   styles.listenButton,
@@ -394,6 +636,8 @@ export default function VoiceAssistantModal({
                 </Text>
               </Pressable>
             </View>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -419,6 +663,19 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 5,
     width: 56,
+    zIndex: 20,
+  },
+  floatingButtonActive: { backgroundColor: "#dc2626" },
+  unavailable: {
+    backgroundColor: "#fff7ed",
+    borderRadius: 8,
+    bottom: 88,
+    color: "#9a3412",
+    fontSize: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    position: "absolute",
+    right: 14,
     zIndex: 20,
   },
   backdrop: {

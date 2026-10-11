@@ -192,7 +192,7 @@ const normalizeConversation = (value: unknown): PrivateConversation | null => {
 
 export default function MessagesScreen() {
   const route = useRoute<RouteProp<MainTabParamList, "Messages">>();
-  const { isOffline, token, user } = useAuth();
+  const { isOffline, requestAuthentication, token, user } = useAuth();
   const [activeTab, setActiveTab] = useState<"Privés" | "Canaux">("Privés");
   const [selectedChannelId, setSelectedChannelId] =
     useState<ChannelId>("emergency");
@@ -242,6 +242,13 @@ export default function MessagesScreen() {
   useEffect(() => {
     const params = route.params;
     if (!params?.voiceRequestId) return;
+    if (params.voiceChannelId) {
+      setActiveTab("Canaux");
+      setSelectedChannelId(params.voiceChannelId);
+      setSelectedConversation(null);
+      setConversationSearch("");
+      return;
+    }
     setActiveTab("Privés");
     setSelectedConversation(null);
     setConversationSearch(params.voiceContactQuery ?? "");
@@ -618,6 +625,10 @@ export default function MessagesScreen() {
     const text = draftMessage.trim();
     if (!text && !imageUri) {
       Alert.alert("Message vide", "Saisissez un message ou joignez une photo.");
+      return;
+    }
+    if (!user?.id || !token) {
+      requestAuthentication();
       return;
     }
     if (!API_BASE_URL) {

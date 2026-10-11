@@ -14,6 +14,7 @@ export type MainTabParamList = {
     | {
         voiceRequestId?: string;
         voiceContactQuery?: string;
+        voiceChannelId?: "emergency" | "announcements";
       }
     | undefined;
   Talkie: undefined;

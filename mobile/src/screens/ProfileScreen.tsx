@@ -42,6 +42,10 @@ import {
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import VoiceTextInput from "../components/VoiceTextInput";
+import {
+  EMERGENCY_COUNTRIES,
+  type EmergencyCountry,
+} from "../services/emergencyServices";
 import { API_BASE_URL, apiFetch } from "../services/api";
 import type { RootStackParamList } from "../navigation/types";
 import {
@@ -49,38 +53,9 @@ import {
   subscribeToTechnicalAvailability,
 } from "../startup/technicalStatus";
 
-type Country = {
-  name: string;
-  code: string;
-  emergencyNumbers: {
-    police: string;
-    fire: string;
-    medical: string;
-  };
-};
+type Country = EmergencyCountry;
 
-const COUNTRIES: Country[] = [
-  {
-    name: "Burkina Faso",
-    code: "BF",
-    emergencyNumbers: { police: "17", fire: "18", medical: "112" },
-  },
-  {
-    name: "Côte d'Ivoire",
-    code: "CI",
-    emergencyNumbers: { police: "110", fire: "180", medical: "185" },
-  },
-  {
-    name: "Mali",
-    code: "ML",
-    emergencyNumbers: { police: "17", fire: "18", medical: "15" },
-  },
-  {
-    name: "Sénégal",
-    code: "SN",
-    emergencyNumbers: { police: "17", fire: "18", medical: "1515" },
-  },
-];
+const COUNTRIES = EMERGENCY_COUNTRIES;
 
 const EMERGENCY_SERVICES = [
   { id: "police", name: "Police / Gendarmerie", icon: Shield },
