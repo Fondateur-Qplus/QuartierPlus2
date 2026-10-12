@@ -207,7 +207,11 @@ function RootNavigator() {
 
 function VoiceAssistantLayer({ currentRoute }: { currentRoute: string }) {
   const { isSessionLoading, requestAuthentication, user } = useAuth();
-  const { isAssistantActive, requestAssistant } = useVoiceAssistant();
+  const {
+    isAssistantActive,
+    isFloatingButtonEnabled,
+    requestAssistant,
+  } = useVoiceAssistant();
   const insets = useSafeAreaInsets();
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   useEffect(() => {
@@ -286,7 +290,7 @@ function VoiceAssistantLayer({ currentRoute }: { currentRoute: string }) {
         : 66;
   return (
     <>
-      {!hideAssistant && (
+      {isFloatingButtonEnabled && !hideAssistant && (
         <Pressable
           accessibilityLabel="Assistant vocal"
           accessibilityRole="button"

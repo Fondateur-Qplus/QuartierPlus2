@@ -2,10 +2,12 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
   type PropsWithChildren,
 } from "react";
+import { openProfileStore } from "../storage/profileStore";
 
 type VoiceAssistantContextValue = {
   registerInput: (insertText: (text: string) => void) => () => void;
@@ -19,6 +21,8 @@ type VoiceAssistantContextValue = {
   recognitionAvailable: boolean | null;
   setRecognitionAvailable: (available: boolean) => void;
   clearActiveInput: () => void;
+  isFloatingButtonEnabled: boolean;
+  setFloatingButtonEnabled: (enabled: boolean) => void;
 };
 
 const VoiceAssistantContext =
@@ -32,6 +36,24 @@ export function VoiceAssistantProvider({ children }: PropsWithChildren) {
     boolean | null
   >(null);
   const [isAssistantActive, setAssistantActive] = useState(false);
+  const [isFloatingButtonEnabled, setFloatingButtonEnabled] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    void openProfileStore()
+      .then((store) => store.getPreferences())
+      .then((preferences) => {
+        if (mounted) {
+          setFloatingButtonEnabled(preferences.voiceAssistantFloatingButton);
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("Unable to load voice assistant preferences:", error);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const registerInput = useCallback(
     (insertText: (text: string) => void) => {
@@ -85,6 +107,7 @@ export function VoiceAssistantProvider({ children }: PropsWithChildren) {
         clearActiveInput,
         insertIntoFocusedInput,
         isAssistantActive,
+        isFloatingButtonEnabled,
         recognitionAvailable,
         registerAssistantHandler,
         registerDictationHandler,
@@ -92,6 +115,7 @@ export function VoiceAssistantProvider({ children }: PropsWithChildren) {
         requestAssistant,
         requestDictation,
         setAssistantActive,
+        setFloatingButtonEnabled,
         setRecognitionAvailable,
       }}
     >

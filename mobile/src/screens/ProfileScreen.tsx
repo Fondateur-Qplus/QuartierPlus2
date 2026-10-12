@@ -8,6 +8,7 @@ import {
   Info,
   Lock,
   LogOut,
+  Mic,
   MapPin,
   PhoneCall,
   Settings,
@@ -42,6 +43,7 @@ import {
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import VoiceTextInput from "../components/VoiceTextInput";
+import { useVoiceAssistant } from "../context/VoiceAssistantContext";
 import {
   EMERGENCY_COUNTRIES,
   type EmergencyCountry,
@@ -120,6 +122,7 @@ const PLUS_DESTINATIONS = [
 export default function ProfileScreen() {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { isOffline, requestAuthentication, signOut, user } = useAuth();
+  const { setFloatingButtonEnabled } = useVoiceAssistant();
   const [selectedCountry, setSelectedCountry] = useState<Country>(COUNTRIES[3]);
   const [countryMenuOpen, setCountryMenuOpen] = useState(false);
   const [contacts, setContacts] = useState<TrustedContact[]>([]);
@@ -132,6 +135,7 @@ export default function ProfileScreen() {
     language: "fr",
     sosNotificationsEnabled: true,
     defaultRadiusKm: 3,
+    voiceAssistantFloatingButton: false,
   });
   const [profileError, setProfileError] = useState<string | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -489,6 +493,7 @@ export default function ProfileScreen() {
       setPreferences(next);
       setSosNotificationsEnabled(next.sosNotificationsEnabled);
       setDefaultRadius(`${next.defaultRadiusKm} km`);
+      setFloatingButtonEnabled(next.voiceAssistantFloatingButton);
     } catch (error) {
       Alert.alert(
         "Enregistrement impossible",
@@ -1074,6 +1079,37 @@ export default function ProfileScreen() {
                 </Pressable>
               );
             })}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Assistant vocal</Text>
+          <View style={styles.settingsCard}>
+            <View style={styles.menuRow}>
+              <Mic color="#2563eb" size={19} />
+              <View style={styles.notificationCopy}>
+                <Text style={styles.menuLabel}>Afficher le bouton flottant</Text>
+                <Text style={styles.settingDescription}>
+                  Ajouter un raccourci à l’écran
+                </Text>
+              </View>
+              <Switch
+                accessibilityLabel="Assistant vocal : afficher le bouton flottant"
+                onValueChange={(enabled) =>
+                  void updatePreferences({
+                    ...preferences,
+                    voiceAssistantFloatingButton: enabled,
+                  })
+                }
+                trackColor={{ false: "#cbd5e1", true: "#86efac" }}
+                thumbColor={
+                  preferences.voiceAssistantFloatingButton
+                    ? "#16a34a"
+                    : "#f8fafc"
+                }
+                value={preferences.voiceAssistantFloatingButton}
+              />
+            </View>
           </View>
         </View>
 

@@ -23,6 +23,7 @@ export type AppPreferences = {
   language: "fr" | "en";
   sosNotificationsEnabled: boolean;
   defaultRadiusKm: 3 | 10 | 30;
+  voiceAssistantFloatingButton: boolean;
 };
 
 export type ProfileStore = {
@@ -185,6 +186,8 @@ export const openProfileStore = async (): Promise<ProfileStore> => {
         language: language === "en" ? "en" : "fr",
         sosNotificationsEnabled: values.get("sos_notifications") !== "false",
         defaultRadiusKm: radius === 10 || radius === 30 ? radius : 3,
+        voiceAssistantFloatingButton:
+          values.get("voice_assistant_floating_button") === "true",
       };
     },
     async setPreferences(preferences) {
@@ -193,6 +196,10 @@ export const openProfileStore = async (): Promise<ProfileStore> => {
         ["language", preferences.language],
         ["sos_notifications", String(preferences.sosNotificationsEnabled)],
         ["default_radius_km", String(preferences.defaultRadiusKm)],
+        [
+          "voice_assistant_floating_button",
+          String(preferences.voiceAssistantFloatingButton),
+        ],
       ];
       await database.withExclusiveTransactionAsync(async (transaction) => {
         for (const [key, value] of entries) {

@@ -5,7 +5,7 @@ import {
 } from "expo-speech-recognition";
 import * as SecureStore from "expo-secure-store";
 import { Mic, MicOff, X } from "lucide-react-native";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import {
   Animated,
   Modal,
@@ -27,10 +27,23 @@ import {
   VOICE_COMMAND_EXAMPLES,
   type VoiceCommand,
 } from "../services/voiceAssistant";
+import {
+  transitionVoiceAssistant,
+  type VoiceAssistantEvent,
+} from "../services/voiceAssistantState";
 
 const PERMISSION_EXPLANATION_KEY = "quartierplus.voice-permission-explained";
 const PERMISSION_REQUESTED_KEY = "quartierplus.voice-permission-requested";
 const SOS_CONFIRMATION_SECONDS = 5;
+
+class VoiceAssistantStartError extends Error {
+  constructor(
+    readonly state: VoiceAssistantEvent,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 type VoiceAssistantModalProps = {
   onNavigate: (command: VoiceCommand) => boolean;
@@ -49,14 +62,20 @@ export default function VoiceAssistantModal({
     setAssistantActive,
     setRecognitionAvailable,
   } = useVoiceAssistant();
+  const [machineState, dispatchVoiceEvent] = useReducer(
+    transitionVoiceAssistant,
+    "idle",
+  );
+  const isListening = machineState === "listening";
   const [isVisible, setIsVisible] = useState(false);
-  const [isListening, setIsListening] = useState(false);
   const [permissionExplanationVisible, setPermissionExplanationVisible] =
     useState(false);
   const [sosCountdown, setSosCountdown] = useState<number | null>(null);
   const [transcript, setTranscript] = useState("");
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
+  const [technicalDetails, setTechnicalDetails] = useState("");
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
   const [pendingSosCommand, setPendingSosCommand] =
     useState<VoiceCommand | null>(null);
   const waveValues = useRef([
@@ -70,12 +89,6 @@ export default function VoiceAssistantModal({
   const pendingSosCommandRef = useRef<VoiceCommand | null>(null);
   const sosTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const speechLanguageRef = useRef("fr-FR");
-
-  useEffect(() => {
-    setRecognitionAvailable(
-      ExpoSpeechRecognitionModule.isRecognitionAvailable(),
-    );
-  }, [setRecognitionAvailable]);
 
   useEffect(
     () =>
@@ -95,10 +108,10 @@ export default function VoiceAssistantModal({
 
   useSpeechRecognitionEvent("start", () => {
     if (!isVisibleRef.current) return;
-    setIsListening(true);
+    dispatchVoiceEvent("start");
     setError("");
   });
-  useSpeechRecognitionEvent("end", () => setIsListening(false));
+  useSpeechRecognitionEvent("end", () => dispatchVoiceEvent("stop"));
   useSpeechRecognitionEvent("result", (event) => {
     if (!isVisibleRef.current) return;
     if (!event.isFinal) return;
@@ -109,9 +122,19 @@ export default function VoiceAssistantModal({
   });
   useSpeechRecognitionEvent("error", (event) => {
     if (!isVisibleRef.current) return;
-    setIsListening(false);
+    dispatchVoiceEvent(
+      event.error === "not-allowed"
+        ? "permission-denied"
+        : event.error === "language-not-supported"
+          ? "language-unsupported"
+          : event.error === "service-not-allowed"
+            ? "service-unavailable"
+            : "error",
+    );
     const message = speechErrorMessage(event.error, isOffline);
     setError(message);
+    setTechnicalDetails(`Code de reconnaissance vocale : ${event.error}`);
+    setShowTechnicalDetails(false);
     setFeedback(message);
     speak(message);
   });
@@ -249,15 +272,38 @@ export default function VoiceAssistantModal({
   }
 
   async function startListening(mode: "command" | "dictation" = "command") {
-    if (recognitionAvailable !== true) return;
     const requestId = ++startRequestRef.current;
     dictationOnlyRef.current = mode === "dictation";
     isVisibleRef.current = true;
     setError("");
+    setTechnicalDetails("");
+    setShowTechnicalDetails(false);
     setTranscript("");
     setFeedback("");
     setAssistantActive(true);
     setIsVisible(true);
+    dispatchVoiceEvent("activate");
+
+    let available = recognitionAvailable;
+    if (available === null) {
+      try {
+        available = ExpoSpeechRecognitionModule.isRecognitionAvailable();
+        setRecognitionAvailable(available);
+      } catch (availabilityError) {
+        available = false;
+        setRecognitionAvailable(false);
+        console.error("Unable to initialize speech recognition:", availabilityError);
+      }
+    }
+    if (!available) {
+      dispatchVoiceEvent("service-unavailable");
+      const message = speechErrorMessage("service-not-allowed", isOffline);
+      setError(message);
+      setFeedback(message);
+      setTechnicalDetails("Le service de reconnaissance vocale est indisponible.");
+      return;
+    }
+    dispatchVoiceEvent("ready");
 
     try {
       const profileStore = await openProfileStore();
@@ -276,11 +322,14 @@ export default function VoiceAssistantModal({
       }
 
       await beginListening(requestId);
-    } catch {
+    } catch (caughtError) {
       if (requestId !== startRequestRef.current) return;
+      console.error("Unable to prepare voice assistant:", caughtError);
       const message = "Impossible de préparer la permission du microphone.";
       setError(message);
       setFeedback(message);
+      setTechnicalDetails("Échec de lecture des préférences vocales ou de confidentialité.");
+      dispatchVoiceEvent("error");
     }
   }
 
@@ -291,10 +340,13 @@ export default function VoiceAssistantModal({
       await SecureStore.setItemAsync(PERMISSION_EXPLANATION_KEY, "true");
       if (requestId !== startRequestRef.current) return;
       await beginListening(requestId, speechLanguageRef.current);
-    } catch {
+    } catch (caughtError) {
+      console.error("Unable to save voice privacy choice:", caughtError);
       const message = "Impossible d’enregistrer votre choix de confidentialité.";
       setError(message);
       setFeedback(message);
+      setTechnicalDetails("Échec d’enregistrement du choix de confidentialité.");
+      dispatchVoiceEvent("error");
     }
   }
 
@@ -313,7 +365,10 @@ export default function VoiceAssistantModal({
         );
         if (requestId !== startRequestRef.current) return;
         if (requestAlreadyMade === "true") {
-          throw new Error(speechErrorMessage("not-allowed", isOffline));
+          throw new VoiceAssistantStartError(
+            "permission-denied",
+            speechErrorMessage("not-allowed", isOffline),
+          );
         }
         await SecureStore.setItemAsync(PERMISSION_REQUESTED_KEY, "true");
         if (requestId !== startRequestRef.current) return;
@@ -321,7 +376,10 @@ export default function VoiceAssistantModal({
       }
       if (requestId !== startRequestRef.current) return;
       if (!permission.granted) {
-        throw new Error(speechErrorMessage("not-allowed", isOffline));
+        throw new VoiceAssistantStartError(
+          "permission-denied",
+          speechErrorMessage("not-allowed", isOffline),
+        );
       }
 
       const options = {
@@ -334,7 +392,10 @@ export default function VoiceAssistantModal({
 
       if (isOffline) {
         if (!ExpoSpeechRecognitionModule.supportsOnDeviceRecognition()) {
-          throw new Error(speechErrorMessage("service-not-allowed", true));
+          throw new VoiceAssistantStartError(
+            "service-unavailable",
+            speechErrorMessage("service-not-allowed", true),
+          );
         }
         const locales = await ExpoSpeechRecognitionModule.getSupportedLocales({});
         if (requestId !== startRequestRef.current) return;
@@ -345,7 +406,10 @@ export default function VoiceAssistantModal({
               .startsWith(language.slice(0, 2).toLowerCase()),
         );
         if (!hasOfflineFrench) {
-          throw new Error(speechErrorMessage("service-not-allowed", true));
+          throw new VoiceAssistantStartError(
+            "language-unsupported",
+            speechErrorMessage("language-not-supported", true),
+          );
         }
         ExpoSpeechRecognitionModule.start({
           ...options,
@@ -363,6 +427,19 @@ export default function VoiceAssistantModal({
         caughtError instanceof Error
           ? caughtError.message
           : "Impossible de démarrer la reconnaissance vocale.";
+      if (caughtError instanceof VoiceAssistantStartError) {
+        dispatchVoiceEvent(caughtError.state);
+        setTechnicalDetails(
+          `État de reconnaissance vocale : ${caughtError.state}`,
+        );
+      } else {
+        setTechnicalDetails(
+          caughtError instanceof Error
+            ? `${caughtError.name}: ${caughtError.message}`
+            : "Erreur vocale non détaillée.",
+        );
+        dispatchVoiceEvent("error");
+      }
       setError(message);
       setFeedback(message);
       speak(message);
@@ -371,7 +448,7 @@ export default function VoiceAssistantModal({
 
   function stopListening() {
     ExpoSpeechRecognitionModule.stop();
-    setIsListening(false);
+    dispatchVoiceEvent("stop");
   }
 
   function close() {
@@ -383,7 +460,7 @@ export default function VoiceAssistantModal({
     ExpoSpeechRecognitionModule.abort();
     Speech.stop();
     clearActiveInput();
-    setIsListening(false);
+    dispatchVoiceEvent("reset");
     setIsVisible(false);
     setPermissionExplanationVisible(false);
     setSosCountdown(null);
@@ -451,14 +528,6 @@ export default function VoiceAssistantModal({
       "J’ouvre le panneau SOS. Choisissez le type d’urgence et confirmez l’envoi dans l’écran.";
     setFeedback(confirmation);
     speak(confirmation);
-  }
-
-  if (recognitionAvailable === false) {
-    return (
-      <Text accessibilityLiveRegion="polite" style={styles.unavailable}>
-        Reconnaissance vocale indisponible
-      </Text>
-    );
   }
 
   return (
@@ -568,9 +637,33 @@ export default function VoiceAssistantModal({
               </Text>
             ) : null}
             {error ? (
-              <Text accessibilityRole="alert" style={styles.error}>
-                {error}
-              </Text>
+              <>
+                <Text accessibilityRole="alert" style={styles.error}>
+                  {error}
+                </Text>
+                {technicalDetails ? (
+                  <>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: showTechnicalDetails }}
+                      onPress={() =>
+                        setShowTechnicalDetails((visible) => !visible)
+                      }
+                    >
+                      <Text style={styles.detailsToggle}>
+                        {showTechnicalDetails
+                          ? "Masquer les détails techniques"
+                          : "Détails techniques"}
+                      </Text>
+                    </Pressable>
+                    {showTechnicalDetails ? (
+                      <Text selectable style={styles.technicalDetails}>
+                        {technicalDetails}
+                      </Text>
+                    ) : null}
+                  </>
+                ) : null}
+              </>
             ) : null}
 
             {pendingSosCommand ? (
@@ -643,18 +736,8 @@ export default function VoiceAssistantModal({
 }
 
 const styles = StyleSheet.create({
-  unavailable: {
-    backgroundColor: "#fff7ed",
-    borderRadius: 8,
-    bottom: 88,
-    color: "#9a3412",
-    fontSize: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    position: "absolute",
-    right: 14,
-    zIndex: 20,
-  },
+  detailsToggle: { color: "#475569", fontSize: 12, textDecorationLine: "underline" },
+  technicalDetails: { color: "#64748b", fontSize: 11, lineHeight: 16 },
   backdrop: {
     alignItems: "center",
     backgroundColor: "rgba(15, 23, 42, 0.55)",

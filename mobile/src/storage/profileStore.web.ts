@@ -13,6 +13,7 @@ const DEFAULT_PREFERENCES: AppPreferences = {
   language: "fr",
   sosNotificationsEnabled: true,
   defaultRadiusKm: 3,
+  voiceAssistantFloatingButton: false,
 };
 
 export const openProfileStore = async (): Promise<ProfileStore> => ({
@@ -66,6 +67,8 @@ export const openProfileStore = async (): Promise<ProfileStore> => ({
         value.defaultRadiusKm === 10 || value.defaultRadiusKm === 30
           ? value.defaultRadiusKm
           : 3,
+      voiceAssistantFloatingButton:
+        value.voiceAssistantFloatingButton === true,
     };
   },
   async setPreferences(preferences: AppPreferences) {

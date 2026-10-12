@@ -6,12 +6,15 @@
   Native 0.86 et l'architecture Expo Modules; synthèse système via
   `expo-speech`. Langue fr-FR par défaut, en-US si la préférence d'application
   est anglaise.
-- Microphone flottant discret pour les commandes et bouton de dictée dans les
-  champs de messages, annonces, profil et recherche. Chaque action déclenche
+- Une seule feuille d'écoute est montée à la racine. Le microphone discret de
+  l'en-tête l'ouvre par défaut; le bouton flottant est désactivé par défaut et
+  se règle dans Profil > Assistant vocal > Afficher le bouton flottant. Les
+  boutons de dictée des champs restent disponibles. Chaque action déclenche
   une seule écoute; aucune écoute continue.
 - Avant la première demande de permission, afficher une explication claire.
-  Si le moteur de reconnaissance est indisponible, masquer les boutons micro
-  et afficher « Reconnaissance vocale indisponible ».
+  Le moteur vocal et sa disponibilité sont vérifiés à la première activation,
+  indépendamment de l'affichage du bouton flottant. Les erreurs de permission,
+  de service et de langue restent visibles dans « Détails techniques ».
 - Le parseur local `mobile/src/services/voiceAssistant.ts` utilise intentions,
   synonymes et correspondance approximative, sans IA ni clé secrète. Il ouvre
   les surfaces existantes : carte, Marché, canaux URGENCES et ANNONCES, profil
@@ -31,7 +34,8 @@
 ## Validation
 
 - `npm test -- --runInBand` dans `mobile` couvre les commandes, les synonymes,
-  les correspondances approximatives, l'appel officiel et les confirmations.
+  les correspondances approximatives, l'appel officiel, les confirmations et
+  la machine d'états de l'assistant.
 - `npx tsc --noEmit` et `npx expo export --platform android` vérifient les
   types et le bundle Android.
 - `npx expo prebuild --platform android --no-install` doit générer dans le

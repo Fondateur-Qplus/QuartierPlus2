@@ -4,6 +4,7 @@ import { useNavigation } from "@react-navigation/native";
 import {
   AlertTriangle,
   MapPin,
+  Mic,
   Plus,
   RefreshCw,
   ShoppingBag,
@@ -22,6 +23,7 @@ import {
 } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { useAuth } from "../context/AuthContext";
+import { useVoiceAssistant } from "../context/VoiceAssistantContext";
 import {
   cacheAlerts,
   cachePosts,
@@ -157,6 +159,7 @@ export default function FeedScreen() {
   const navigation =
     useNavigation<BottomTabNavigationProp<MainTabParamList>>();
   const { authStatus, isOffline, requestAuthentication, user } = useAuth();
+  const { requestAssistant } = useVoiceAssistant();
   const { width: pageWidth } = useWindowDimensions();
   const pagerRef = useRef<ScrollView>(null);
   const [scope, setScope] = useState<FeedScope>("country");
@@ -561,14 +564,24 @@ export default function FeedScreen() {
             </View>
           </View>
         )}
-        <Pressable
-          accessibilityLabel="Actualiser le fil"
-          accessibilityRole="button"
-          onPress={refresh}
-          style={styles.refreshButton}
-        >
-          <RefreshCw color="#2563eb" size={20} />
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            accessibilityLabel="Assistant vocal"
+            accessibilityRole="button"
+            onPress={requestAssistant}
+            style={styles.microphoneButton}
+          >
+            <Mic color="#475569" size={18} />
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Actualiser le fil"
+            accessibilityRole="button"
+            onPress={refresh}
+            style={styles.refreshButton}
+          >
+            <RefreshCw color="#2563eb" size={20} />
+          </Pressable>
+        </View>
       </View>
       {error && (
         <View style={[styles.notice, entries.length ? styles.cachedNotice : styles.errorNotice]}>
@@ -696,6 +709,15 @@ const styles = StyleSheet.create({
   eyebrow: { color: "#2563eb", fontSize: 10, fontWeight: "800", letterSpacing: 1.2 },
   title: { color: "#0f172a", fontSize: 24, fontWeight: "800", marginTop: 3 },
   subtitle: { color: "#64748b", fontSize: 13, marginTop: 3 },
+  headerActions: { alignItems: "center", flexDirection: "row", gap: 8 },
+  microphoneButton: {
+    alignItems: "center",
+    backgroundColor: "#f8fafc",
+    borderRadius: 20,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
   scopeBar: {
     backgroundColor: "#ffffff",
     flexDirection: "row",
