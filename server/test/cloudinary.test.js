@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { test } from "node:test";
+
+process.env.NODE_ENV ??= "test";
+process.env.DATABASE_URL ??= "postgres://localhost/quartierplus_test";
+process.env.JWT_SECRET ??= "test-secret-that-is-long-enough-for-jwt";
+process.env.CLOUDINARY_CLOUD_NAME = "quartierplus-test";
+process.env.CLOUDINARY_API_KEY = "test-api-key";
+process.env.CLOUDINARY_API_SECRET = "test-api-secret";
+process.env.DOTENV_CONFIG_PATH = "/dev/null";
+
+const { createCloudinaryUploadSignature, hasGpsMetadata } = await import(
+  "../services/cloudinary.js"
+);
+
+test("Cloudinary upload signatures sort params and never return the secret", () => {
+  const parameters = {
+    timestamp: 123,
+    public_id: "user-123_asset",
+    folder: "quartierplus/posts",
+  };
+  const result = createCloudinaryUploadSignature(parameters);
+  const expected = createHash("sha1")
+    .update(
+      "folder=quartierplus/posts&public_id=user-123_asset&timestamp=123test-api-secret",
+    )
+    .digest("hex");
+
+  assert.equal(result.signature, expected);
+  assert.equal(result.apiKey, "test-api-key");
+  assert.equal(result.cloudName, "quartierplus-test");
+  assert.equal("apiSecret" in result, false);
+  assert.equal(JSON.stringify(result).includes("test-api-secret"), false);
+});
+
+test("GPS EXIF metadata is detected for post-upload deletion", () => {
+  assert.equal(
+    hasGpsMetadata({ Make: "Camera", GPSLatitude: "12/1, 34/1" }),
+    true,
+  );
+  assert.equal(hasGpsMetadata({ Make: "Camera", Orientation: 1 }), false);
+});

@@ -40,6 +40,7 @@ const userProfile = (user) => ({
   country_code: user.country_code,
   reputation_score: user.reputation_score,
   is_verified: user.is_verified,
+  phone_verified_at: user.phone_verified_at,
 });
 
 const deliverOtp = async (phoneNumber, code) => {
@@ -594,7 +595,8 @@ export const verifyOtp = async (request, response, next) => {
                  CASE WHEN $7 = 'sms' THEN NOW() END,
                  CASE WHEN $7 = 'email' THEN NOW() END, NOW())
          RETURNING id, phone_number, email, google_id, full_name, role,
-                   neighborhood, country_code, reputation_score, is_verified`,
+                   neighborhood, country_code, reputation_score, is_verified,
+                   phone_verified_at`,
         [
           phoneNumber,
           registration.email,
@@ -619,7 +621,8 @@ export const verifyOtp = async (request, response, next) => {
          WHERE (phone_number = $1 OR phone_e164 = $1)
            AND is_verified = TRUE
          RETURNING id, phone_number, email, google_id, full_name, role,
-                   neighborhood, country_code, reputation_score, is_verified`,
+                   neighborhood, country_code, reputation_score, is_verified,
+                   phone_verified_at`,
         [phoneNumber, await detectCountryCode(client, phoneNumber), channel],
       );
       if (result.rowCount === 0) {
@@ -760,7 +763,8 @@ export const googleAuth = async (request, response, next) => {
                    is_verified = TRUE
                WHERE id = $4
                RETURNING id, phone_number, email, google_id, full_name, role,
-                         neighborhood, country_code, reputation_score, is_verified`,
+                         neighborhood, country_code, reputation_score, is_verified,
+                         phone_verified_at`,
               [
                 identity.googleId,
                 identity.email,
@@ -772,7 +776,8 @@ export const googleAuth = async (request, response, next) => {
               `INSERT INTO users (google_id, email, full_name, is_verified)
                VALUES ($1, $2, $3, TRUE)
                RETURNING id, phone_number, email, google_id, full_name, role,
-                         neighborhood, country_code, reputation_score, is_verified`,
+                         neighborhood, country_code, reputation_score, is_verified,
+                         phone_verified_at`,
               [identity.googleId, identity.email, identity.name],
             );
       user = result.rows[0];

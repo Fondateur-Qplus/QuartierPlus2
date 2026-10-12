@@ -88,6 +88,30 @@ if (isProduction && ticketQrSecret.length < 32) {
   );
 }
 
+const cloudinaryCloudName = optional("CLOUDINARY_CLOUD_NAME");
+const cloudinaryApiKey = optional("CLOUDINARY_API_KEY");
+const cloudinaryApiSecret = optional("CLOUDINARY_API_SECRET");
+const cloudinarySettings = [
+  cloudinaryCloudName,
+  cloudinaryApiKey,
+  cloudinaryApiSecret,
+];
+if (cloudinarySettings.some(Boolean) && !cloudinarySettings.every(Boolean)) {
+  throw new Error(
+    "CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET must be configured together.",
+  );
+}
+
+const positiveInteger = (name, fallback) => {
+  const value = optional(name);
+  if (!value) return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(`${name} must be a positive integer.`);
+  }
+  return parsed;
+};
+
 const googleClientId = optional("GOOGLE_CLIENT_ID");
 const livekitApiKey = optional("LIVEKIT_API_KEY");
 const livekitApiSecret = optional("LIVEKIT_API_SECRET");
@@ -151,6 +175,13 @@ export const env = Object.freeze({
   fedapayEnvironment,
   fedapayWebhookSecret: optional("FEDAPAY_WEBHOOK_SECRET"),
   ticketQrSecret: ticketQrSecret || jwtSecret,
+  cloudinaryCloudName,
+  cloudinaryApiKey,
+  cloudinaryApiSecret,
+  postMaxPhotoBytes: positiveInteger("POST_MAX_PHOTO_BYTES", 10 * 1024 * 1024),
+  postMaxVideoSeconds: positiveInteger("POST_MAX_VIDEO_SECONDS", 30),
+  postMaxVideoBytes: positiveInteger("POST_MAX_VIDEO_BYTES", 30 * 1024 * 1024),
+  postDailyLimit: positiveInteger("POST_DAILY_LIMIT", 10),
   isPromoFreeAccess: promoFreeAccessValue === "true",
   pgSsl: pgSslValue === "true",
   socketCorsOrigins: optional("SOCKET_CORS_ORIGIN")

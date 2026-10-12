@@ -38,6 +38,7 @@ Puis exécutez, sans supprimer de table ni de données, dans cet ordre :
 5. `migrations/005_monetization_fedapay.sql`
 6. `migrations/006_pro_selected_features.sql`
 7. `migrations/007_events_ticketing.sql`
+8. `server/db/posts-migration.sql`
 
 Pour une base Neon neuve, exécutez chaque fichier une seule fois dans l'éditeur
 SQL, dans cet ordre. `auth-migration.sql` utilise des opérations idempotentes
@@ -48,6 +49,8 @@ la version de cette base. `country-config-radius-migration.sql` est idempotente
 et ajoute le rayon de quartier configurable (`default_radius_m`, 5 km par
 défaut) aux configurations de pays existantes. Le seed est rejouable et active
 notamment le Burkina Faso, la Côte d’Ivoire, le Sénégal et le Mali.
+`posts-migration.sql` crée les publications média et leurs index sans modifier
+les tables de la place de marché existantes.
 
 ## 2. Créer le service web Render
 
@@ -124,6 +127,17 @@ invaliderait les signatures des billets déjà émis.
 | `FEDAPAY_ENVIRONMENT` | `sandbox` pour les tests, `live` pour la production |
 | `FEDAPAY_WEBHOOK_SECRET` | Secret configuré dans l'en-tête du webhook FedaPay |
 | `SOCKET_CORS_ORIGIN` | Origines web autorisées, séparées par des virgules |
+| `CLOUDINARY_CLOUD_NAME` | Nom du cloud Cloudinary utilisé par l'API de publication |
+| `CLOUDINARY_API_KEY` | Clé API Cloudinary |
+| `CLOUDINARY_API_SECRET` | Secret API Cloudinary; reste uniquement sur Render |
+| `POST_MAX_PHOTO_BYTES` | Taille maximale d’une photo en octets; défaut `10485760` (10 Mo) |
+| `POST_MAX_VIDEO_SECONDS` | Durée maximale d’une vidéo; défaut `30` secondes |
+| `POST_MAX_VIDEO_BYTES` | Taille maximale d’une vidéo en octets; défaut `31457280` (30 Mo) |
+| `POST_DAILY_LIMIT` | Nombre maximal de publications par compte et par jour; défaut `10` |
+
+Les trois variables `CLOUDINARY_*` doivent être configurées ensemble pour
+activer les publications; aucune ne doit être copiée dans l'application mobile.
+Les variables `POST_*` sont facultatives et remplacent les limites par défaut.
 
 `PORT` est fourni par Render : ne le créez pas manuellement. `OTP_TEST_MODE`
 doit être absent ou `false` en production ; le serveur refuse `true`, même si

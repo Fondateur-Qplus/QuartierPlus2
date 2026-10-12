@@ -73,3 +73,29 @@ test("production environment rejects malformed URLs and boolean variables", () =
     assert.match(result.stderr, new RegExp(name));
   }
 });
+
+test("production environment requires Cloudinary credentials as a complete set", () => {
+  const result = loadProductionConfig({
+    CLOUDINARY_CLOUD_NAME: "quartierplus",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /CLOUDINARY_API_KEY/);
+});
+
+test("media limits are configurable positive integers", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", "import './config/env.js'"],
+    {
+      cwd: serverDirectory,
+      env: {
+        ...productionEnv,
+        POST_MAX_PHOTO_BYTES: "0",
+        DOTENV_CONFIG_PATH: "/dev/null",
+      },
+      encoding: "utf8",
+    },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /POST_MAX_PHOTO_BYTES must be a positive integer/);
+});

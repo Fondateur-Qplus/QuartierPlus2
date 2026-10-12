@@ -2,7 +2,7 @@ import { pool } from "../db/pool.js";
 
 const profileQuery = `
   SELECT id, phone_number, email, google_id, full_name, neighborhood, role,
-         country_code, reputation_score, is_verified, badge
+         country_code, reputation_score, is_verified, phone_verified_at, badge
   FROM users
   WHERE id = $1
 `;
@@ -18,6 +18,7 @@ const formatProfile = (user) => ({
   country_code: user.country_code,
   reputation_score: user.reputation_score,
   is_verified: user.is_verified,
+  phone_verified_at: user.phone_verified_at,
   badge: user.badge,
 });
 
@@ -58,7 +59,8 @@ export const updateCurrentUser = async (request, response, next) => {
            country_code = COALESCE(NULLIF($3, ''), country_code)
        WHERE id = $4
        RETURNING id, phone_number, email, google_id, full_name, neighborhood,
-                 role, country_code, reputation_score, is_verified, badge`,
+                 role, country_code, reputation_score, is_verified,
+                 phone_verified_at, badge`,
       [name, neighborhood || null, countryCode, request.auth.userId],
     );
     if (result.rowCount === 0) {

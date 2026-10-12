@@ -6,6 +6,7 @@ import authRoutes from "./routes/authRoutes.js";
 import eventsRoutes from "./routes/eventsRoutes.js";
 import livekitRoutes from "./routes/livekitRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
+import postsRoutes from "./routes/postsRoutes.js";
 import proRoutes from "./routes/proRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
 import sosRoutes from "./routes/sosRoutes.js";
@@ -31,6 +32,7 @@ app.get(
   getMonetizationConfig,
 );
 app.use(["/api/v1/public", "/v1/public"], publicRoutes);
+app.use(["/api/v1", "/v1"], postsRoutes);
 app.use(["/api/v1/sos", "/v1/sos"], sosRoutes);
 app.use(["/api/v1/auth", "/v1/auth"], authRoutes);
 app.use(["/api/v1/events", "/v1/events"], eventsRoutes);
