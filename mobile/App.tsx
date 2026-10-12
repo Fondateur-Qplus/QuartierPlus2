@@ -56,6 +56,20 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
+const renderTabLabel =
+  (label: string) =>
+  ({ color }: { color: string }) => (
+    <Text
+      allowFontScaling={false}
+      ellipsizeMode="clip"
+      maxFontSizeMultiplier={1.1}
+      numberOfLines={1}
+      style={{ color, fontSize: 12, fontWeight: "500", lineHeight: 14 }}
+    >
+      {label}
+    </Text>
+  );
+
 function MainTabs() {
   const insets = useSafeAreaInsets();
   return (
@@ -68,15 +82,9 @@ function MainTabs() {
           backgroundColor: "#ffffff",
           borderTopColor: "#e2e8f0",
           justifyContent: "space-around",
-          height: 56 + insets.bottom,
+          height: 64 + insets.bottom,
           paddingBottom: Math.max(insets.bottom, 4),
           paddingTop: 6,
-        },
-        tabBarLabelStyle: {
-          fontSize: 10,
-          fontWeight: "500",
-          includeFontPadding: false,
-          maxWidth: "100%",
         },
         tabBarItemStyle: { flex: 1, minWidth: 0 },
       }}
@@ -85,7 +93,7 @@ function MainTabs() {
         name="Accueil"
         component={FeedScreen}
         options={{
-          tabBarLabel: "Accueil",
+          tabBarLabel: renderTabLabel("Accueil"),
           tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
         }}
       />
@@ -93,7 +101,7 @@ function MainTabs() {
         name="CarteSOS"
         component={MapScreen}
         options={{
-          tabBarLabel: "Carte",
+          tabBarLabel: renderTabLabel("Carte"),
           tabBarIcon: ({ color, size }) => <MapPin color={color} size={size} />,
         }}
       />
@@ -101,7 +109,7 @@ function MainTabs() {
         name="Marche"
         component={MarketplaceScreen}
         options={{
-          tabBarLabel: "Marché",
+          tabBarLabel: renderTabLabel("Marché"),
           tabBarIcon: ({ color, size }) => <ShoppingBag color={color} size={size} />,
         }}
       />
@@ -109,7 +117,7 @@ function MainTabs() {
         name="Messages"
         component={MessagesScreen}
         options={{
-          tabBarLabel: "Messages",
+          tabBarLabel: renderTabLabel("Messages"),
           tabBarIcon: ({ color, size }) => (
             <MessageSquare color={color} size={size} />
           ),
@@ -119,7 +127,7 @@ function MainTabs() {
         name="Profil"
         component={SettingsScreen}
         options={{
-          tabBarLabel: "Profil",
+          tabBarLabel: renderTabLabel("Profil"),
           tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
         }}
       />
