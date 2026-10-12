@@ -8,16 +8,19 @@ import {
   RefreshCw,
   ShoppingBag,
 } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
+import * as SecureStore from "expo-secure-store";
 import { useAuth } from "../context/AuthContext";
 import {
   cacheAlerts,
@@ -25,8 +28,16 @@ import {
   getCachedAlerts,
   getCachedPosts,
 } from "../services/db";
+import { openProfileStore } from "../storage/profileStore";
 import { API_BASE_URL, apiFetch } from "../services/api";
 import type { MainTabParamList } from "../navigation/types";
+import {
+  FEED_SCOPES,
+  isFeedCoordinates,
+  resolveFeedCountryCode,
+  type FeedCoordinates,
+  type FeedScope,
+} from "../services/feedScopes";
 
 type FeedEntry = {
   id: string;
@@ -145,7 +156,14 @@ const formatDate = (date: string) => {
 export default function FeedScreen() {
   const navigation =
     useNavigation<BottomTabNavigationProp<MainTabParamList>>();
-  const { authStatus, isOffline } = useAuth();
+  const { authStatus, isOffline, requestAuthentication, user } = useAuth();
+  const { width: pageWidth } = useWindowDimensions();
+  const pagerRef = useRef<ScrollView>(null);
+  const [scope, setScope] = useState<FeedScope>("country");
+  const [countryCode, setCountryCode] = useState<string | null>(null);
+  const [coordinates, setCoordinates] = useState<FeedCoordinates | null>(null);
+  const [scopeReady, setScopeReady] = useState(false);
+  const [locationInvitation, setLocationInvitation] = useState(false);
   const [entries, setEntries] = useState<FeedEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -153,6 +171,66 @@ export default function FeedScreen() {
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
   const [isServerRequestPending, setIsServerRequestPending] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      let configuredCountryCode: string | null = null;
+      try {
+        configuredCountryCode = (await (await openProfileStore()).getCountry())
+          ?.code ?? null;
+      } catch (loadError) {
+        console.warn("Unable to read the configured feed country:", loadError);
+      }
+      const inferredCountryCode = resolveFeedCountryCode({
+        userCountryCode: user?.country_code,
+        phoneNumber: user?.phone_number,
+        deviceLocale: Intl.DateTimeFormat().resolvedOptions().locale,
+        configuredCountryCode,
+      });
+      let knownPosition: FeedCoordinates | null = null;
+      if (authStatus !== "guest") {
+        try {
+          const savedPosition = await SecureStore.getItemAsync(
+            "quartierplus.feed.last-position",
+          );
+          if (savedPosition) {
+            const parsed: unknown = JSON.parse(savedPosition);
+            if (isFeedCoordinates(parsed)) knownPosition = parsed;
+          }
+          const permission = await Location.getForegroundPermissionsAsync();
+          if (permission.granted) {
+            const lastKnown = await Location.getLastKnownPositionAsync();
+            if (lastKnown) {
+              knownPosition = {
+                latitude: lastKnown.coords.latitude,
+                longitude: lastKnown.coords.longitude,
+              };
+            } else if (!knownPosition) {
+              const current = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+              });
+              knownPosition = {
+                latitude: current.coords.latitude,
+                longitude: current.coords.longitude,
+              };
+            }
+          }
+        } catch (locationError) {
+          console.warn("Unable to read the last known feed location:", locationError);
+        }
+      }
+      if (cancelled) return;
+      setCountryCode(inferredCountryCode);
+      setCoordinates(knownPosition);
+      setScope(knownPosition && authStatus !== "guest" ? "neighborhood" : "country");
+      setLocationInvitation(!knownPosition);
+      setScopeReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus, user?.country_code, user?.phone_number]);
 
   const loadCachedFeed = useCallback(async () => {
     const [posts, alerts] = await Promise.all([
@@ -169,7 +247,81 @@ export default function FeedScreen() {
     return cachedPosts.length + cachedAlerts.length;
   }, []);
 
+  const movePagerTo = useCallback(
+    (nextScope: FeedScope) => {
+      const index = FEED_SCOPES.findIndex((option) => option.id === nextScope);
+      pagerRef.current?.scrollTo({ x: index * pageWidth, animated: true });
+    },
+    [pageWidth],
+  );
+
+  const chooseScope = useCallback(
+    async (nextScope: FeedScope) => {
+      if (nextScope === "neighborhood" || nextScope === "region") {
+        if (authStatus === "guest") {
+          requestAuthentication();
+          movePagerTo(scope);
+          return;
+        }
+        let nextCoordinates = coordinates;
+        if (!nextCoordinates) {
+          try {
+            const permission =
+              await Location.requestForegroundPermissionsAsync();
+            if (!permission.granted) {
+              setScope("country");
+              setLocationInvitation(true);
+              movePagerTo("country");
+              return;
+            }
+            const position = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+            nextCoordinates = {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            };
+            await SecureStore.setItemAsync(
+              "quartierplus.feed.last-position",
+              JSON.stringify(nextCoordinates),
+            );
+            setCoordinates(nextCoordinates);
+          } catch (locationError) {
+            console.warn("Unable to activate location-based feed scope:", locationError);
+            setScope("country");
+            setLocationInvitation(true);
+            movePagerTo("country");
+            return;
+          }
+        }
+        if (!nextCoordinates) {
+          setScope("country");
+          setLocationInvitation(true);
+          movePagerTo("country");
+          return;
+        }
+      }
+      setScope(nextScope);
+      setLocationInvitation(false);
+      movePagerTo(nextScope);
+    },
+    [
+      authStatus,
+      coordinates,
+      movePagerTo,
+      requestAuthentication,
+      scope,
+    ],
+  );
+
   useEffect(() => {
+    if (!scopeReady) return;
+    const index = FEED_SCOPES.findIndex((option) => option.id === scope);
+    pagerRef.current?.scrollTo({ x: index * pageWidth, animated: false });
+  }, [pageWidth, scope, scopeReady]);
+
+  useEffect(() => {
+    if (!scopeReady || !countryCode) return;
     let cancelled = false;
     const controller = new AbortController();
     const loadFeed = async () => {
@@ -181,16 +333,25 @@ export default function FeedScreen() {
           if (!API_BASE_URL || isOffline) {
             setEntries([]);
             setError({
-              message: "Les annonces publiques seront disponibles dès que la connexion sera rétablie.",
-              details: "Mode invité hors ligne ou URL API absente.",
+              message: "Les publications publiques sont temporairement indisponibles.",
+              details: !API_BASE_URL
+                ? "EXPO_PUBLIC_API_URL n'est pas configurée."
+                : "Le mode invité est hors ligne.",
             });
             return;
           }
           setIsServerRequestPending(true);
-          const response = await apiFetch(`${API_BASE_URL}/v1/public/marketplace`, {
+          const query = new URLSearchParams({
+            scope,
+            country_code: countryCode,
+          });
+          const response = await apiFetch(
+            `${API_BASE_URL}/v1/public/marketplace?${query.toString()}`,
+            {
             signal: controller.signal,
             timeoutMs: 60_000,
-          });
+            },
+          );
           if (!cancelled) setIsServerRequestPending(false);
           if (!response.ok) {
             throw new FeedHttpError("/v1/public/marketplace", response.status);
@@ -219,18 +380,21 @@ export default function FeedScreen() {
           return;
         }
         if (!cancelled && cachedCount > 0) setIsLoading(false);
-        const permission = await Location.requestForegroundPermissionsAsync();
-        if (permission.status !== "granted") {
-          throw new Error("Autorisez la localisation pour charger le fil de proximité.");
+        if (
+          (scope === "neighborhood" || scope === "region") &&
+          !coordinates
+        ) {
+          if (!cancelled) {
+            setScope("country");
+            setLocationInvitation(true);
+          }
+          return;
         }
-        const position = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        const query = new URLSearchParams({
-          latitude: String(position.coords.latitude),
-          longitude: String(position.coords.longitude),
-          radius_m: "30000",
-        });
+        const query = new URLSearchParams({ scope, country_code: countryCode });
+        if (coordinates && (scope === "neighborhood" || scope === "region")) {
+          query.set("latitude", String(coordinates.latitude));
+          query.set("longitude", String(coordinates.longitude));
+        }
 
         setIsServerRequestPending(true);
         const [postsResponse, alertsResponse] = await Promise.all([
@@ -276,10 +440,7 @@ export default function FeedScreen() {
         if (authStatus === "guest") {
           setEntries([]);
           setError({
-            message:
-              loadError instanceof Error
-                ? loadError.message
-                : "Les annonces publiques sont temporairement indisponibles.",
+            message: "Les publications publiques sont temporairement indisponibles.",
             details:
               loadError instanceof FeedHttpError
                 ? `${loadError.path} — HTTP ${loadError.status}`
@@ -299,9 +460,7 @@ export default function FeedScreen() {
           message:
             cachedCount > 0
               ? "Connexion indisponible : affichage du fil enregistré sur cet appareil."
-              : loadError instanceof Error
-                ? loadError.message
-                : "Impossible de charger le fil du quartier.",
+              : "Impossible de charger le fil pour le moment. Vérifiez votre connexion puis réessayez.",
           details:
             loadError instanceof FeedHttpError
               ? `${loadError.path} — HTTP ${loadError.status}`
@@ -322,7 +481,16 @@ export default function FeedScreen() {
       cancelled = true;
       controller.abort();
     };
-  }, [authStatus, isOffline, loadCachedFeed, refreshKey]);
+  }, [
+    authStatus,
+    countryCode,
+    coordinates,
+    isOffline,
+    loadCachedFeed,
+    refreshKey,
+    scope,
+    scopeReady,
+  ]);
 
   const refresh = () => {
     setIsRefreshing(true);
@@ -343,9 +511,56 @@ export default function FeedScreen() {
           <Text style={styles.eyebrow}>QUARTIERPLUS</Text>
           <Text style={styles.title}>Fil du quartier</Text>
           <Text style={styles.subtitle}>
-            {authStatus === "guest" ? "Annonces publiques du quartier" : "Publications et alertes à proximité"}
+            {authStatus === "guest"
+              ? "Publications publiques"
+              : "Publications et alertes à proximité"}
           </Text>
         </View>
+        <View style={styles.scopeBar}>
+          {FEED_SCOPES.map((option) => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected: scope === option.id }}
+              key={option.id}
+              onPress={() => void chooseScope(option.id)}
+              style={[styles.scopeChip, scope === option.id && styles.scopeChipSelected]}
+            >
+              <Text
+                style={[
+                  styles.scopeLabel,
+                  scope === option.id && styles.scopeLabelSelected,
+                ]}
+              >
+                {option.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        {locationInvitation && (
+          <View style={styles.locationInvitation}>
+            <MapPin color="#2563eb" size={18} />
+            <View style={styles.invitationCopy}>
+              <Text style={styles.invitationText}>
+                Activez la localisation pour voir votre quartier
+              </Text>
+              {authStatus === "guest" ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={requestAuthentication}
+                >
+                  <Text style={styles.invitationAction}>Se connecter</Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => void Linking.openSettings()}
+                >
+                  <Text style={styles.invitationAction}>Ouvrir les réglages</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        )}
         <Pressable
           accessibilityLabel="Actualiser le fil"
           accessibilityRole="button"
@@ -377,59 +592,80 @@ export default function FeedScreen() {
           )}
         </View>
       )}
-      {isLoading && entries.length === 0 ? (
-        <View style={styles.loading}>
-          <ActivityIndicator color="#2563eb" size="large" />
-          <Text style={styles.loadingText}>
-            {isServerRequestPending
-              ? "Le serveur se réveille…"
-              : "Chargement du fil local…"}
-          </Text>
-        </View>
-      ) : (
-        <ScrollView
-          contentContainerStyle={styles.list}
-          refreshControl={
-            <RefreshControl refreshing={isRefreshing} onRefresh={refresh} />
-          }
-        >
-          {entries.map((entry) => (
-            <View key={`${entry.kind}:${entry.id}`} style={styles.card}>
-              <View style={styles.cardHeader}>
-                <View style={[styles.icon, entry.kind === "alert" && styles.alertIcon]}>
-                  {entry.kind === "alert" ? (
-                    <AlertTriangle color="#dc2626" size={19} />
-                  ) : (
-                    <ShoppingBag color="#2563eb" size={19} />
-                  )}
-                </View>
-                <View style={styles.cardHeading}>
-                  <Text style={styles.category}>{entry.category}</Text>
-                  <Text style={styles.date}>{formatDate(entry.createdAt)}</Text>
-                </View>
-                {entry.price ? <Text style={styles.price}>{entry.price}</Text> : null}
+      <ScrollView
+        horizontal
+        onMomentumScrollEnd={(event) => {
+          const index = Math.round(
+            event.nativeEvent.contentOffset.x / pageWidth,
+          );
+          const nextScope = FEED_SCOPES[index]?.id;
+          if (nextScope && nextScope !== scope) void chooseScope(nextScope);
+        }}
+        pagingEnabled
+        ref={pagerRef}
+        showsHorizontalScrollIndicator={false}
+        style={styles.pager}
+      >
+        {FEED_SCOPES.map((option) => (
+          <View key={option.id} style={[styles.pagerPage, { width: pageWidth }]}>
+            {isLoading && entries.length === 0 ? (
+              <View style={styles.loading}>
+                <ActivityIndicator color="#2563eb" size="large" />
+                <Text style={styles.loadingText}>
+                  {isServerRequestPending
+                    ? "Le serveur se réveille…"
+                    : "Chargement du fil local…"}
+                </Text>
               </View>
-              <Text style={styles.cardTitle}>{entry.title}</Text>
-              {entry.body ? <Text style={styles.body}>{entry.body}</Text> : null}
-              {entry.location ? (
-                <View style={styles.location}>
-                  <MapPin color="#64748b" size={14} />
-                  <Text style={styles.locationText}>{entry.location}</Text>
-                </View>
-              ) : null}
-            </View>
-          ))}
-          {!entries.length && !isLoading && (
-            <View style={styles.empty}>
-              <MapPin color="#94a3b8" size={30} />
-              <Text style={styles.emptyTitle}>Rien à signaler pour le moment</Text>
-              <Text style={styles.emptyText}>
-                Les annonces et les alertes de votre quartier apparaîtront ici.
-              </Text>
-            </View>
-          )}
-        </ScrollView>
-      )}
+            ) : (
+              <ScrollView
+                contentContainerStyle={styles.list}
+                nestedScrollEnabled
+                refreshControl={
+                  <RefreshControl refreshing={isRefreshing} onRefresh={refresh} />
+                }
+                style={styles.feedPage}
+              >
+                {entries.map((entry) => (
+                  <View key={`${entry.kind}:${entry.id}`} style={styles.card}>
+                    <View style={styles.cardHeader}>
+                      <View style={[styles.icon, entry.kind === "alert" && styles.alertIcon]}>
+                        {entry.kind === "alert" ? (
+                          <AlertTriangle color="#dc2626" size={19} />
+                        ) : (
+                          <ShoppingBag color="#2563eb" size={19} />
+                        )}
+                      </View>
+                      <View style={styles.cardHeading}>
+                        <Text style={styles.category}>{entry.category}</Text>
+                        <Text style={styles.date}>{formatDate(entry.createdAt)}</Text>
+                      </View>
+                      {entry.price ? <Text style={styles.price}>{entry.price}</Text> : null}
+                    </View>
+                    <Text style={styles.cardTitle}>{entry.title}</Text>
+                    {entry.body ? <Text style={styles.body}>{entry.body}</Text> : null}
+                    {entry.location ? (
+                      <View style={styles.location}>
+                        <MapPin color="#64748b" size={14} />
+                        <Text style={styles.locationText}>{entry.location}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ))}
+                {!entries.length && !isLoading && (
+                  <View style={styles.empty}>
+                    <MapPin color="#94a3b8" size={30} />
+                    <Text style={styles.emptyTitle}>Rien à signaler pour le moment</Text>
+                    <Text style={styles.emptyText}>
+                      Les publications correspondant à la portée sélectionnée apparaîtront ici.
+                    </Text>
+                  </View>
+                )}
+              </ScrollView>
+            )}
+          </View>
+        ))}
+      </ScrollView>
       <Pressable
         accessibilityLabel="Créer une annonce avec photo"
         accessibilityRole="button"
@@ -444,6 +680,9 @@ export default function FeedScreen() {
 
 const styles = StyleSheet.create({
   screen: { backgroundColor: "#f1f5f9", flex: 1, paddingTop: 54 },
+  pager: { flex: 1 },
+  pagerPage: { flex: 1 },
+  feedPage: { flex: 1 },
   header: {
     alignItems: "center",
     backgroundColor: "#ffffff",
@@ -457,6 +696,38 @@ const styles = StyleSheet.create({
   eyebrow: { color: "#2563eb", fontSize: 10, fontWeight: "800", letterSpacing: 1.2 },
   title: { color: "#0f172a", fontSize: 24, fontWeight: "800", marginTop: 3 },
   subtitle: { color: "#64748b", fontSize: 13, marginTop: 3 },
+  scopeBar: {
+    backgroundColor: "#ffffff",
+    flexDirection: "row",
+    gap: 5,
+    justifyContent: "space-around",
+    paddingHorizontal: 10,
+    paddingBottom: 10,
+  },
+  scopeChip: {
+    alignItems: "center",
+    borderRadius: 16,
+    flex: 1,
+    minHeight: 34,
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  scopeChipSelected: { backgroundColor: "#dbeafe" },
+  scopeLabel: { color: "#64748b", fontSize: 11, fontWeight: "600" },
+  scopeLabelSelected: { color: "#1d4ed8" },
+  locationInvitation: {
+    alignItems: "center",
+    backgroundColor: "#eff6ff",
+    borderRadius: 10,
+    flexDirection: "row",
+    gap: 10,
+    marginHorizontal: 14,
+    marginTop: 10,
+    padding: 12,
+  },
+  invitationCopy: { flex: 1, gap: 4 },
+  invitationText: { color: "#334155", fontSize: 12, lineHeight: 18 },
+  invitationAction: { color: "#1d4ed8", fontSize: 12, fontWeight: "700" },
   refreshButton: {
     alignItems: "center",
     backgroundColor: "#eff6ff",

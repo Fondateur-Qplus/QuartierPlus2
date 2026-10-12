@@ -32,19 +32,22 @@ CREATE EXTENSION IF NOT EXISTS "postgis";
 Puis exécutez, sans supprimer de table ni de données, dans cet ordre :
 
 1. `server/db/init.sql`
-2. `server/db/auth-migration.sql`
-3. `server/db/seeds.sql`
-4. `migrations/005_monetization_fedapay.sql`
-5. `migrations/006_pro_selected_features.sql`
-6. `migrations/007_events_ticketing.sql`
+2. `server/db/country-config-radius-migration.sql`
+3. `server/db/auth-migration.sql`
+4. `server/db/seeds.sql`
+5. `migrations/005_monetization_fedapay.sql`
+6. `migrations/006_pro_selected_features.sql`
+7. `migrations/007_events_ticketing.sql`
 
 Pour une base Neon neuve, exécutez chaque fichier une seule fois dans l'éditeur
 SQL, dans cet ordre. `auth-migration.sql` utilise des opérations idempotentes
 et peut être relancé sans supprimer de données. Les migrations 006 et 007
 dépendent des tables introduites par la migration 005. Ne relancez pas
 `init.sql` sur une base déjà utilisée ; choisissez les migrations adaptées à
-la version de cette base. Le seed est rejouable et active notamment le Burkina
-Faso, la Côte d’Ivoire, le Sénégal et le Mali.
+la version de cette base. `country-config-radius-migration.sql` est idempotente
+et ajoute le rayon de quartier configurable (`default_radius_m`, 5 km par
+défaut) aux configurations de pays existantes. Le seed est rejouable et active
+notamment le Burkina Faso, la Côte d’Ivoire, le Sénégal et le Mali.
 
 ## 2. Créer le service web Render
 

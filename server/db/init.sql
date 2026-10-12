@@ -5,12 +5,16 @@ CREATE TABLE IF NOT EXISTS country_config (
     code VARCHAR(3) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     phone_prefix VARCHAR(5) NOT NULL,
+    default_radius_m INTEGER NOT NULL DEFAULT 5000 CHECK (default_radius_m > 0),
     police_number VARCHAR(20) NOT NULL,
     firefighters_number VARCHAR(20) NOT NULL,
     ambulance_number VARCHAR(20) NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE country_config
+    ADD COLUMN IF NOT EXISTS default_radius_m INTEGER NOT NULL DEFAULT 5000;
 
 CREATE TABLE IF NOT EXISTS country_phone_prefixes (
     country_code VARCHAR(3) NOT NULL REFERENCES country_config(code) ON DELETE CASCADE,

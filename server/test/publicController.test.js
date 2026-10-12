@@ -38,7 +38,7 @@ test("public marketplace returns an empty successful feed when there are no item
 
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.payload, { items: [] });
-  assert.deepEqual(queryValues, [null, null, null]);
+  assert.deepEqual(queryValues, [null, null, null, null, null]);
 });
 
 test("nearby SOS alerts accept valid radius filters and return an empty list", async (context) => {
@@ -50,7 +50,13 @@ test("nearby SOS alerts accept valid radius filters and return an empty list", a
   const response = createResponse();
 
   await listNearbyAlerts(
-    { query: { latitude: "12.37", longitude: "-1.52", radius_m: "30000" } },
+    {
+      query: {
+        latitude: "12.37",
+        longitude: "-1.52",
+        radius_m: "30000",
+      },
+    },
     response,
     (error) => {
       throw error;
@@ -59,7 +65,7 @@ test("nearby SOS alerts accept valid radius filters and return an empty list", a
 
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.payload, { alerts: [] });
-  assert.deepEqual(queryValues, [12.37, -1.52, 30_000]);
+  assert.deepEqual(queryValues, [12.37, -1.52, 30_000, null, null]);
 });
 
 test("public feed rejects invalid coordinates instead of ignoring the filter", async (context) => {
@@ -78,4 +84,41 @@ test("public feed rejects invalid coordinates instead of ignoring the filter", a
 
   assert.equal(response.statusCode, 400);
   assert.match(response.payload.error, /position/);
+});
+
+test("country scope filters marketplace posts by country without coordinates", async (context) => {
+  let queryValues;
+  context.mock.method(pool, "query", async (_statement, values) => {
+    queryValues = values;
+    return { rowCount: 0, rows: [] };
+  });
+  const response = createResponse();
+
+  await listPublicMarketplace(
+    { query: { scope: "country", country_code: "bf" } },
+    response,
+    (error) => {
+      throw error;
+    },
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(queryValues, [null, null, null, "BF", "country"]);
+});
+
+test("neighborhood scope rejects missing position and country code", async (context) => {
+  context.mock.method(pool, "query", async () => {
+    throw new Error("Invalid scopes must not query the database.");
+  });
+  const response = createResponse();
+
+  await listPublicMarketplace(
+    { query: { scope: "neighborhood" } },
+    response,
+    (error) => {
+      throw error;
+    },
+  );
+
+  assert.equal(response.statusCode, 400);
 });

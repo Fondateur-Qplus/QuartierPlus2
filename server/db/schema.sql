@@ -5,6 +5,7 @@ CREATE TABLE country_config (
     code VARCHAR(3) PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     phone_prefix VARCHAR(5) NOT NULL,
+    default_radius_m INTEGER NOT NULL DEFAULT 5000 CHECK (default_radius_m > 0),
     police_number VARCHAR(20) NOT NULL,
     firefighters_number VARCHAR(20) NOT NULL,
     ambulance_number VARCHAR(20) NOT NULL,
