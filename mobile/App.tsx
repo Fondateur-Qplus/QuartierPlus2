@@ -79,6 +79,8 @@ function MainTabs() {
         tabBarActiveTintColor: "#2563eb",
         tabBarInactiveTintColor: "#64748b",
         tabBarStyle: {
+          flexDirection: "row",
+          width: "100%",
           backgroundColor: "#ffffff",
           borderTopColor: "#e2e8f0",
           justifyContent: "space-around",
@@ -134,22 +136,34 @@ function MainTabs() {
       <Tab.Screen
         name="Talkie"
         component={WalkieTalkieScreen}
-        options={{ tabBarButton: () => null }}
+        options={{
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: "none" },
+        }}
       />
       <Tab.Screen
         name="Grin"
         component={GrinScreen}
-        options={{ tabBarButton: () => null }}
+        options={{
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: "none" },
+        }}
       />
       <Tab.Screen
         name="EspacePro"
         component={ProTabNavigator}
-        options={{ tabBarButton: () => null }}
+        options={{
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: "none" },
+        }}
       />
       <Tab.Screen
         name="Événements"
         component={EventsNavigator}
-        options={{ tabBarButton: () => null }}
+        options={{
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: "none" },
+        }}
       />
     </Tab.Navigator>
   );

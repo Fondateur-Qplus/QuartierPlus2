@@ -1,0 +1,95 @@
+import { pool } from "../db/pool.js";
+
+const CHANNEL_ALIASES = new Map([
+  ["EMERGENCY", "EMERGENCY"],
+  ["URGENCES", "EMERGENCY"],
+  ["ANNOUNCEMENTS", "ANNOUNCEMENTS"],
+  ["ANNONCES", "ANNOUNCEMENTS"],
+]);
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const findChannel = async (channelId) => {
+  const alias = CHANNEL_ALIASES.get(channelId.toUpperCase());
+  if (alias) {
+    const result = await pool.query(
+      `SELECT id, name FROM channels
+       WHERE UPPER(kind) = $1 OR UPPER(name) = $2
+       ORDER BY CASE WHEN UPPER(kind) = $1 THEN 0 ELSE 1 END
+       LIMIT 1`,
+      [alias, channelId.toUpperCase()],
+    );
+    return result.rows[0] ?? null;
+  }
+  if (!UUID_PATTERN.test(channelId)) return null;
+  const result = await pool.query(
+    `SELECT id, name FROM channels WHERE id = $1
+     AND UPPER(kind) IN ('EMERGENCY', 'ANNOUNCEMENTS')`,
+    [channelId],
+  );
+  return result.rows[0] ?? null;
+};
+
+export const listChannelMessages = async (request, response, next) => {
+  try {
+    const channel = await findChannel(request.params.channelId);
+    if (!channel) {
+      return response.status(404).json({ error: "Canal public introuvable." });
+    }
+    const result = await pool.query(
+      `SELECT message.id, message.channel_id, message.sender_id,
+              profile.full_name AS sender_name, message.body,
+              message.media_url, message.media_type, message.created_at,
+              message.sender_id = $2 AS is_mine
+       FROM messages AS message
+       LEFT JOIN users AS profile ON profile.id = message.sender_id
+       WHERE message.channel_id = $1
+       ORDER BY message.created_at DESC
+       LIMIT 100`,
+      [channel.id, request.auth.userId],
+    );
+    return response.status(200).json({
+      messages: result.rows
+        .reverse()
+        .map((message) => ({ ...message, channel_id: request.params.channelId })),
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const createChannelMessage = async (request, response, next) => {
+  const body =
+    typeof request.body?.content === "string"
+      ? request.body.content.trim()
+      : typeof request.body?.body === "string"
+        ? request.body.body.trim()
+        : "";
+  if (!body || body.length > 5000) {
+    return response.status(400).json({ error: "Contenu du message invalide." });
+  }
+  try {
+    const channel = await findChannel(request.params.channelId);
+    if (!channel) {
+      return response.status(404).json({ error: "Canal public introuvable." });
+    }
+    const result = await pool.query(
+      `INSERT INTO messages (channel_id, sender_id, body)
+       VALUES ($1, $2, $3)
+       RETURNING id, channel_id, sender_id, body, created_at`,
+      [channel.id, request.auth.userId, body],
+    );
+    return response.status(201).json({
+      message: {
+        ...result.rows[0],
+        channel_id: request.params.channelId,
+        channel_name: channel.name,
+        sender_name: request.user?.fullName ?? "Voisin",
+        content: body,
+        is_mine: true,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+};

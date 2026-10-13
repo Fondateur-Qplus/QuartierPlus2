@@ -1,0 +1,6 @@
+ALTER TABLE posts
+    ALTER COLUMN media_public_id DROP NOT NULL,
+    ALTER COLUMN media_url DROP NOT NULL,
+    ALTER COLUMN media_type DROP NOT NULL,
+    ALTER COLUMN media_format DROP NOT NULL,
+    ALTER COLUMN media_bytes DROP NOT NULL;

@@ -170,6 +170,7 @@ const getVerifiedAsset = async (userId, mediaPublicId, mediaType) => {
 export const createPost = async (request, response, next) => {
   const scope = request.body?.scope;
   const mediaType = request.body?.media_type;
+  const hasMedia = mediaType !== null && mediaType !== undefined;
   const caption =
     typeof request.body?.caption === "string" ? request.body.caption.trim() : "";
   const coordinates = parseCoordinates(
@@ -179,7 +180,7 @@ export const createPost = async (request, response, next) => {
   if (!SCOPES.has(scope)) {
     return response.status(400).json({ error: "La portée choisie est invalide." });
   }
-  if (mediaType !== "image" && mediaType !== "video") {
+  if (hasMedia && mediaType !== "image" && mediaType !== "video") {
     return response.status(400).json({ error: "Type de média invalide." });
   }
   if (caption.length > 1000) {
@@ -207,12 +208,14 @@ export const createPost = async (request, response, next) => {
         error: "Le pays du compte doit être configuré avant de publier.",
       });
     }
-    const media = await getVerifiedAsset(
-      user.id,
-      request.body?.media_public_id,
-      mediaType,
-    );
-    if (media.error) return response.status(400).json({ error: media.error });
+    const media = hasMedia
+      ? await getVerifiedAsset(
+          user.id,
+          request.body?.media_public_id,
+          mediaType,
+        )
+      : null;
+    if (media?.error) return response.status(400).json({ error: media.error });
     const roundedPosition = coordinates
       ? roundCoordinatesTo200mGrid(coordinates)
       : null;
@@ -265,12 +268,12 @@ export const createPost = async (request, response, next) => {
           roundedPosition?.latitude ?? null,
           roundedPosition?.longitude ?? null,
           caption,
-          media.asset.public_id,
-          media.asset.secure_url,
+          media?.asset.public_id ?? null,
+          media?.asset.secure_url ?? null,
           mediaType,
-          media.format,
-          media.asset.bytes,
-          media.duration,
+          media?.format ?? null,
+          media?.asset.bytes ?? null,
+          media?.duration ?? null,
         ],
       );
       await client.query("COMMIT");

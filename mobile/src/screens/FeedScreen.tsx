@@ -119,7 +119,10 @@ const normalizePost = (value: unknown): FeedEntry | null => {
   if (!isRecord(value)) return null;
   const id = String(value.id ?? "");
   const title = String(
-    value.title ?? value.name ?? (value.media_url ? "Photo du quartier" : ""),
+    value.title ??
+      value.name ??
+      value.caption ??
+      (value.media_url ? "Photo du quartier" : "Publication du quartier"),
   );
   if (!id || !title) return null;
   const free = value.is_free === true || value.isFree === true;
@@ -722,6 +725,7 @@ export default function FeedScreen() {
     uploadControllerRef.current = controller;
     setIsPublishing(true);
     setUploadProgress(0);
+    let postRequestStarted = false;
     try {
       const signatureResponse = await apiFetch(
         `${API_BASE_URL}/v1/media/sign`,
@@ -782,6 +786,7 @@ export default function FeedScreen() {
         formData,
         {
           signal: controller.signal,
+          timeout: 20_000,
           onUploadProgress(event) {
             if (!event.total) return;
             setUploadProgress(Math.min(90, Math.round((event.loaded / event.total) * 90)));
@@ -828,14 +833,63 @@ export default function FeedScreen() {
     } catch (publishError) {
       if (controller.signal.aborted) return;
       console.error("Unable to publish photo:", publishError);
-      Alert.alert(
-        "Publication impossible",
-        publishError instanceof PublicationApiError
-          ? publishError.message
-          : axios.isAxiosError(publishError)
-            ? "Le téléversement a échoué. Vérifiez la connexion puis réessayez."
-            : "Impossible de publier cette photo. Réessayez dans un instant.",
-      );
+      if (postRequestStarted || !draftCaption.trim()) {
+        Alert.alert(
+          "Publication impossible",
+          publishError instanceof PublicationApiError
+            ? publishError.message
+            : axios.isAxiosError(publishError)
+              ? "Le téléversement a échoué. Vérifiez la connexion puis réessayez."
+              : "Impossible de publier cette photo. Réessayez dans un instant.",
+        );
+        return;
+      }
+      try {
+        const fallbackResponse = await apiFetch(`${API_BASE_URL}/v1/posts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            caption: draftCaption.trim(),
+            scope: draftScope,
+            media_type: null,
+            ...(position
+              ? {
+                  latitude: position.latitude,
+                  longitude: position.longitude,
+                }
+              : {}),
+          }),
+          signal: controller.signal,
+        });
+        if (!fallbackResponse.ok) {
+          const payload: unknown = await fallbackResponse.json();
+          throw new PublicationApiError(
+            isRecord(payload) && typeof payload.error === "string"
+              ? payload.error
+              : "La publication texte a été refusée par le serveur.",
+          );
+        }
+        setComposerStage("closed");
+        setDraftPhoto(null);
+        setDraftCaption("");
+        refresh();
+        Alert.alert(
+          "Publication texte seule",
+          "Le média n’a pas pu être téléversé. Votre publication texte a été enregistrée.",
+        );
+      } catch (fallbackError) {
+        if (controller.signal.aborted) return;
+        Alert.alert(
+          "Publication impossible",
+          fallbackError instanceof PublicationApiError
+            ? fallbackError.message
+            : publishError instanceof PublicationApiError
+              ? publishError.message
+              : axios.isAxiosError(publishError)
+                ? "Le téléversement et la publication texte ont échoué. Vérifiez la connexion puis réessayez."
+                : "Impossible de publier cette photo. Réessayez dans un instant.",
+        );
+      }
     } finally {
       if (uploadControllerRef.current === controller) {
         uploadControllerRef.current = null;

@@ -328,11 +328,18 @@ export default function MarketplaceScreen() {
         if (selectedCategory !== "ALL") {
           query.set("category", selectedCategory);
         }
-        if (selectedCountry !== "Tous les pays") {
-          query.set("country", selectedCountry);
+        const selectedCountryCode: Record<string, string> = {
+          Sénégal: "SN",
+          "Côte d'Ivoire": "CI",
+          Bénin: "BJ",
+        };
+        const countryCode = selectedCountryCode[selectedCountry];
+        if (countryCode) {
+          query.set("country_code", countryCode);
+          query.set("scope", "country");
         }
         const response = await apiFetch(
-          `${API_BASE_URL}/v1/marketplace/items?${query.toString()}`,
+          `${API_BASE_URL}/v1/public/marketplace?${query.toString()}`,
           { signal: controller.signal },
         );
         if (!response.ok) {

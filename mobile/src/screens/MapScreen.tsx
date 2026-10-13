@@ -934,27 +934,6 @@ export default function MapScreen() {
       const controller = abortControllerRef.current;
       if (!controller || controller.signal.aborted) return;
 
-      const imageFilename = emergencyImageUri.split("/").pop() ?? "emergency.jpg";
-      const audioFilename = audioUri.split("/").pop() ?? "ambient-audio.m4a";
-      const formData = new FormData();
-      const appendNativeFile = (
-        name: string,
-        uri: string,
-        filename: string,
-        mimeType: string,
-      ) => {
-        const nativeFile = { uri, name: filename, type: mimeType };
-        const nativeFormData = formData as FormData & {
-          append: (key: string, value: string | typeof nativeFile) => void;
-        };
-        nativeFormData.append(name, nativeFile);
-      };
-      appendNativeFile("emergency_image", emergencyImageUri, imageFilename, "image/jpeg");
-      appendNativeFile("ambient_audio", audioUri, audioFilename, "audio/m4a");
-      formData.append("latitude", String(position.coords.latitude));
-      formData.append("longitude", String(position.coords.longitude));
-      formData.append("emergency_type", "SOS");
-
       if (isOffline) {
         const persistentImage = new File(
           Paths.document,
@@ -969,7 +948,7 @@ export default function MapScreen() {
         await queueOfflineAction("trigger_sos", {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
-          emergency_type: "SOS",
+          emergency_type: "OTHER",
           emergency_image_uri: persistentImage.uri,
           ambient_audio_uri: persistentAudio.uri,
         });
@@ -981,17 +960,39 @@ export default function MapScreen() {
         return;
       }
 
-      const response = await apiFetch(`${API_BASE_URL}/v1/sos`, {
-        method: "POST",
-        body: formData,
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const responseText = await response.text();
-        throw new Error(
-          responseText || `Le serveur a refusé l'alerte (HTTP ${response.status}).`,
-        );
+      const activeSocket = socketRef.current;
+      if (!activeSocket?.connected) {
+        throw new Error("La connexion SOS est indisponible. Réessayez dans un instant.");
       }
+      const result = await new Promise<unknown>((resolve, reject) => {
+        activeSocket.timeout(10_000).emit(
+          "sos:trigger",
+          {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            emergency_type: "OTHER",
+          },
+          (timeoutError: Error | null, payload: unknown) => {
+            if (timeoutError) {
+              reject(new Error("Le serveur n’a pas confirmé l’alerte SOS."));
+              return;
+            }
+            if (!isRecord(payload) || payload.ok !== true) {
+              reject(
+                new Error(
+                  isRecord(payload) && typeof payload.error === "string"
+                    ? payload.error
+                    : "Le serveur a refusé l’alerte SOS.",
+                ),
+              );
+              return;
+            }
+            resolve(payload);
+          },
+        );
+      });
+      if (controller.signal.aborted) return;
+      if (isRecord(result) && result.alert) handleSosAlert(result.alert);
 
       dismissSosFlow();
       Alert.alert("Alerte SOS envoyée", "Votre alerte a été transmise au réseau.");

@@ -39,6 +39,8 @@ Puis exécutez, sans supprimer de table ni de données, dans cet ordre :
 6. `migrations/006_pro_selected_features.sql`
 7. `migrations/007_events_ticketing.sql`
 8. `server/db/posts-migration.sql`
+9. `migrations/008_posts_text_only_fallback.sql`
+10. `migrations/009_sos_assists.sql`
 
 Pour une base Neon neuve, exécutez chaque fichier une seule fois dans l'éditeur
 SQL, dans cet ordre. `auth-migration.sql` utilise des opérations idempotentes
@@ -50,7 +52,10 @@ et ajoute le rayon de quartier configurable (`default_radius_m`, 5 km par
 défaut) aux configurations de pays existantes. Le seed est rejouable et active
 notamment le Burkina Faso, la Côte d’Ivoire, le Sénégal et le Mali.
 `posts-migration.sql` crée les publications média et leurs index sans modifier
-les tables de la place de marché existantes.
+les tables de la place de marché existantes. La migration 008 rend les colonnes
+média facultatives pour autoriser une publication texte si Cloudinary échoue;
+exécutez-la uniquement après `posts-migration.sql`. La migration 009 ajoute les
+confirmations d’aide aux alertes SOS.
 
 ## 2. Créer le service web Render
 
