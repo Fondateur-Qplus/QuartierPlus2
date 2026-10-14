@@ -14,6 +14,7 @@ import {
 } from "./db";
 
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/, "");
+export const API_TIMEOUT_MS = 60_000;
 export const SESSION_TOKEN_KEY = "quartierplus.session.token";
 
 type CachedRequestConfig = InternalAxiosRequestConfig & {
@@ -91,7 +92,7 @@ const responseFromCache = async (config: CachedRequestConfig) => {
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 20_000,
+  timeout: API_TIMEOUT_MS,
   headers: { Accept: "application/json" },
 });
 

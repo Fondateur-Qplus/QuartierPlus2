@@ -32,7 +32,7 @@ import {
   View,
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
-import { API_BASE_URL, getStoredAuthToken } from "../services/api";
+import { API_BASE_URL, apiFetch, getStoredAuthToken } from "../services/api";
 import { enterGrinPictureInPicture } from "../services/grinPictureInPicture";
 
 type CameraTrackReference = {
@@ -124,7 +124,7 @@ export default function GrinScreen() {
       try {
         const token = await getStoredAuthToken();
         if (!token) throw new Error("Connectez-vous pour rejoindre le Grin.");
-        const response = await fetch(`${API_BASE_URL}/v1/livekit/token`, {
+        const response = await apiFetch(`${API_BASE_URL}/v1/livekit/token`, {
           method: "POST",
           headers: {
             Accept: "application/json",

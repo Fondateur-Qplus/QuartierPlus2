@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
-import { API_BASE_URL, getStoredAuthToken } from "../services/api";
+import { API_BASE_URL, apiFetch } from "../services/api";
 
 type ActiveSpeaker = {
   identity: string;
@@ -45,12 +45,11 @@ export default function WalkieTalkieScreen() {
       setIsConnecting(true);
       setError(null);
       try {
-        const response = await fetch(`${API_BASE_URL}/v1/livekit/token`, {
+        const response = await apiFetch(`${API_BASE_URL}/v1/livekit/token`, {
           method: "POST",
           headers: {
             Accept: "application/json",
             "Content-Type": "application/json",
-            ...(await getAuthorizationHeader()),
           },
           body: JSON.stringify({ room: "emergency" }),
         });
@@ -288,11 +287,6 @@ export default function WalkieTalkieScreen() {
       )}
     </View>
   );
-}
-
-async function getAuthorizationHeader(): Promise<Record<string, string>> {
-  const token = await getStoredAuthToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 const styles = StyleSheet.create({
