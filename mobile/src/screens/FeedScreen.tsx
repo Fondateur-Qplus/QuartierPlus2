@@ -155,23 +155,17 @@ const normalizeAlert = (value: unknown): FeedEntry | null => {
     value.title ?? value.emergency_type ?? value.category ?? "Alerte communautaire",
   );
   if (!id) return null;
-  const coords = isRecord(value.coordinates)
-    ? value.coordinates
-    : isRecord(value.location)
-      ? value.location
-      : value;
-  const latitude = Number(coords.latitude);
-  const longitude = Number(coords.longitude);
-  const coordinateLabel =
-    Number.isFinite(latitude) && Number.isFinite(longitude)
-      ? `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
-      : "";
+  const distance = Number(value.distance_m ?? value.distanceMeters);
+  const distanceLabel =
+    Number.isFinite(distance) && distance >= 0
+      ? `À environ ${Math.max(1, Math.round(distance / 1000))} km`
+      : "À proximité";
   return {
     id,
     kind: "alert",
     title,
     body: String(value.description ?? value.message ?? "Signalement actif dans le quartier."),
-    location: coordinateLabel,
+    location: distanceLabel,
     createdAt: String(value.created_at ?? value.createdAt ?? ""),
     category: String(value.category ?? value.emergency_type ?? "Urgence"),
   };
@@ -188,12 +182,17 @@ const sortEntries = (entries: FeedEntry[]) =>
 
 const formatDate = (date: string) => {
   const timestamp = Date.parse(date);
-  return Number.isFinite(timestamp)
-    ? new Intl.DateTimeFormat("fr-FR", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(timestamp)
-    : "Publication récente";
+  if (!Number.isFinite(timestamp)) return "Publication récente";
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (elapsedMinutes < 1) return "À l’instant";
+  if (elapsedMinutes < 60) return `Il y a ${elapsedMinutes} min`;
+  if (elapsedMinutes < 24 * 60) {
+    return `Il y a ${Math.floor(elapsedMinutes / 60)} h`;
+  }
+  return new Intl.DateTimeFormat("fr-FR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(timestamp);
 };
 
 export default function FeedScreen() {
@@ -1013,13 +1012,26 @@ export default function FeedScreen() {
         {FEED_SCOPES.map((option) => (
           <View key={option.id} style={[styles.pagerPage, { width: pageWidth }]}>
             {isLoading && entries.length === 0 ? (
-              <View style={styles.loading}>
-                <ActivityIndicator color="#2563eb" size="large" />
+              <View style={styles.skeletonList}>
                 <Text style={styles.loadingText}>
                   {isServerRequestPending
                     ? "Le serveur se réveille…"
                     : "Chargement du fil local…"}
                 </Text>
+                {[0, 1, 2].map((item) => (
+                  <View key={item} style={styles.skeletonCard}>
+                    <View style={styles.skeletonHeader}>
+                      <View style={styles.skeletonAvatar} />
+                      <View style={styles.skeletonHeading}>
+                        <View style={[styles.skeletonLine, styles.skeletonShort]} />
+                        <View style={[styles.skeletonLine, styles.skeletonDate]} />
+                      </View>
+                    </View>
+                    <View style={[styles.skeletonLine, styles.skeletonTitle]} />
+                    <View style={[styles.skeletonLine, styles.skeletonBody]} />
+                    {item === 0 ? <View style={styles.skeletonImage} /> : null}
+                  </View>
+                ))}
               </View>
             ) : (
               <ScrollView
@@ -1328,6 +1340,24 @@ const styles = StyleSheet.create({
   locationText: { color: "#64748b", fontSize: 12 },
   loading: { alignItems: "center", flex: 1, justifyContent: "center" },
   loadingText: { color: "#64748b", fontSize: 14, marginTop: 12 },
+  skeletonList: { gap: 12, padding: 14 },
+  skeletonCard: {
+    backgroundColor: "#ffffff",
+    borderColor: "#e2e8f0",
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 10,
+    padding: 15,
+  },
+  skeletonHeader: { alignItems: "center", flexDirection: "row", gap: 10 },
+  skeletonAvatar: { backgroundColor: "#e2e8f0", borderRadius: 12, height: 40, width: 40 },
+  skeletonHeading: { flex: 1, gap: 7 },
+  skeletonLine: { backgroundColor: "#e2e8f0", borderRadius: 5, height: 10 },
+  skeletonShort: { width: "38%" },
+  skeletonDate: { height: 7, width: "24%" },
+  skeletonTitle: { height: 14, marginTop: 5, width: "66%" },
+  skeletonBody: { height: 9, width: "88%" },
+  skeletonImage: { backgroundColor: "#f1f5f9", borderRadius: 12, height: 150, marginTop: 5 },
   empty: { alignItems: "center", paddingHorizontal: 25, paddingTop: 65 },
   emptyTitle: { color: "#334155", fontSize: 17, fontWeight: "700", marginTop: 14 },
   emptyText: { color: "#64748b", fontSize: 13, lineHeight: 20, marginTop: 7, textAlign: "center" },
