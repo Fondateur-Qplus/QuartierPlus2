@@ -37,6 +37,7 @@ const recipientsInRadius = async (
   location,
   radiusKm,
   excludeUserId,
+  maxRecipients = null,
 ) => {
   const onlineSockets = [
     ...io.sockets.sockets.values(),
@@ -65,12 +66,18 @@ const recipientsInRadius = async (
        ST_SetSRID(ST_MakePoint(presence.longitude, presence.latitude), 4326)::geography,
        ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
        $4
-     )`,
+     )
+     ORDER BY ST_Distance(
+       ST_SetSRID(ST_MakePoint(presence.longitude, presence.latitude), 4326)::geography,
+       ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography
+     )
+     LIMIT $5`,
     [
       JSON.stringify(presence),
       location.longitude,
       location.latitude,
       radiusKm * 1000,
+      maxRecipients,
     ],
   );
   return result.rows
@@ -98,6 +105,7 @@ const publicAlert = (alert) => ({
   escalation_level: alert.escalation_level,
   escalation_radius_km: radiusForLevel(alert.escalation_level),
   emergency_image_url: alert.emergency_image_url,
+  emergency_audio_url: alert.emergency_audio_url,
   created_at: alert.created_at,
 });
 
@@ -134,16 +142,29 @@ export const registerSosHandlers = (io, socket) => {
   handleEvent(socket, "sos:trigger", async (payload, acknowledgement) => {
     const userId = socket.data.user?.id;
     const location = parseLocation(payload);
+    const accuracyMeters = Number(payload.accuracy_m);
     const escalationLevel = Number(
       typeof payload === "object" ? payload.escalation_level ?? 1 : 1,
     );
     const radiusKm = radiusForLevel(escalationLevel);
     const emergencyType = emergencyTypeForPayload(payload.emergency_type);
-    if (!userId || !location || !radiusKm || !emergencyType) {
+    if (
+      !userId ||
+      !location ||
+      !radiusKm ||
+      !emergencyType ||
+      payload.mocked === true ||
+      !Number.isFinite(accuracyMeters) ||
+      accuracyMeters > 200
+    ) {
       emitSosError(
         socket,
         acknowledgement,
-        "Coordonnées GPS, type d'urgence ou niveau d'escalade invalides.",
+        payload.mocked === true
+          ? "Une position GPS simulée ne peut pas être utilisée pour un SOS."
+          : accuracyMeters > 200
+            ? "La précision GPS doit être de 200 m ou meilleure."
+            : "Coordonnées GPS, type d'urgence ou niveau d'escalade invalides.",
       );
       return;
     }
@@ -177,37 +198,121 @@ export const registerSosHandlers = (io, socket) => {
       emitSosError(socket, acknowledgement, "URL de photo d'urgence invalide.");
       return;
     }
+    const audioUrl =
+      typeof payload === "object" &&
+      typeof payload.emergency_audio_url === "string"
+        ? payload.emergency_audio_url.trim()
+        : null;
+    let parsedAudioUrl;
+    try {
+      if (audioUrl) parsedAudioUrl = new URL(audioUrl);
+    } catch {
+      emitSosError(socket, acknowledgement, "URL audio d'urgence invalide.");
+      return;
+    }
+    if (
+      audioUrl &&
+      (audioUrl.length > 2048 ||
+        !HTTPS_URL.test(audioUrl) ||
+        parsedAudioUrl?.protocol !== "https:" ||
+        !parsedAudioUrl.hostname)
+    ) {
+      emitSosError(socket, acknowledgement, "URL audio d'urgence invalide.");
+      return;
+    }
 
-    const result = await pool.query(
-      `INSERT INTO sos_alerts (
-         user_id, location, status, emergency_type, escalation_level,
-         emergency_image_url
-       )
-       VALUES (
-         $1,
-         ST_SetSRID(ST_MakePoint($2, $3), 4326),
-         'ACTIVE',
-         $4,
-         $5,
-         $6
-       )
-       RETURNING id,
-         ST_Y(location) AS latitude,
-         ST_X(location) AS longitude,
-         status,
-         emergency_type,
-         escalation_level,
-         emergency_image_url,
-         created_at`,
-      [
-        userId,
-        location.longitude,
-        location.latitude,
-        emergencyType,
-        escalationLevel,
-        imageUrl,
-      ],
-    );
+    const client = await pool.connect();
+    let transactionOpen = false;
+    let isNewAccount = false;
+    let result;
+    try {
+      await client.query("BEGIN");
+      transactionOpen = true;
+      const userResult = await client.query(
+        `SELECT phone_verified_at IS NOT NULL AS phone_verified,
+                created_at > CURRENT_TIMESTAMP - INTERVAL '24 hours'
+                  AS is_new_account
+         FROM users WHERE id = $1 FOR UPDATE`,
+        [userId],
+      );
+      const account = userResult.rows[0];
+      if (!account?.phone_verified) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        emitSosError(
+          socket,
+          acknowledgement,
+          account
+            ? "Vérifiez votre numéro de téléphone avant d'utiliser le SOS."
+            : "Compte utilisateur introuvable.",
+        );
+        return;
+      }
+      const recentAlerts = await client.query(
+        `SELECT COUNT(*)::int AS count
+         FROM sos_alerts
+         WHERE user_id = $1
+           AND created_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour'`,
+        [userId],
+      );
+      if (recentAlerts.rows[0].count >= 3) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        emitSosError(
+          socket,
+          acknowledgement,
+          "La limite de 3 alertes SOS par heure est atteinte.",
+        );
+        return;
+      }
+      isNewAccount = account.is_new_account === true;
+      result = await client.query(
+        `INSERT INTO sos_alerts (
+           user_id, location, status, emergency_type, escalation_level,
+           emergency_image_url, emergency_audio_url
+         )
+         VALUES (
+           $1,
+           ST_SetSRID(ST_MakePoint($2, $3), 4326),
+           'ACTIVE',
+           $4,
+           $5,
+           $6,
+           $7
+         )
+         RETURNING id,
+           ST_Y(location) AS latitude,
+           ST_X(location) AS longitude,
+           status,
+           emergency_type,
+           escalation_level,
+           emergency_image_url,
+           emergency_audio_url,
+           created_at`,
+        [
+          userId,
+          location.longitude,
+          location.latitude,
+          emergencyType,
+          escalationLevel,
+          imageUrl,
+          audioUrl,
+        ],
+      );
+      if (isNewAccount) {
+        await client.query(
+          "INSERT INTO sos_moderation_queue (sos_id) VALUES ($1)",
+          [result.rows[0].id],
+        );
+      }
+      await client.query("COMMIT");
+      transactionOpen = false;
+    } catch (error) {
+      if (transactionOpen) await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
     const alert = result.rows[0];
     socket.data.lastSosTriggerAt = Date.now();
     socket.data.presenceLocation = location;
@@ -217,6 +322,7 @@ export const registerSosHandlers = (io, socket) => {
       location,
       radiusKm,
       userId,
+      isNewAccount ? 5 : null,
     );
     emitToSockets(recipients, "sos:new_alert", payloadForClients);
     emitToSockets(recipients, "sos:new", payloadForClients);
@@ -244,7 +350,12 @@ export const registerSosHandlers = (io, socket) => {
       });
     }
     if (typeof acknowledgement === "function") {
-      acknowledgement({ ok: true, alert: payloadForClients });
+      acknowledgement({
+        ok: true,
+        alert: payloadForClients,
+        relays_notified: recipients.length,
+        moderation_pending: isNewAccount,
+      });
     }
   });
 
@@ -267,7 +378,8 @@ export const registerSosHandlers = (io, socket) => {
            ST_X(location) AS longitude,
            status,
            escalation_level,
-           emergency_image_url`,
+           emergency_image_url,
+           emergency_audio_url`,
         [status, alertId, socket.data.user.id],
       );
       if (result.rowCount === 0) {

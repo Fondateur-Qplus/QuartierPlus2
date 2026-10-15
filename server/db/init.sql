@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS sos_alerts (
         CHECK (emergency_type IN ('MEDICAL', 'SECURITY', 'FIRE', 'OTHER')),
     escalation_level INT DEFAULT 1,
     emergency_image_url TEXT,
+    emergency_audio_url TEXT,
     livekit_room_id VARCHAR(100),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -77,13 +78,29 @@ CREATE TABLE IF NOT EXISTS sos_assists (
     PRIMARY KEY (sos_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS sos_moderation_queue (
+    sos_id UUID PRIMARY KEY REFERENCES sos_alerts(id) ON DELETE CASCADE,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
+        CHECK (status IN ('PENDING', 'REVIEWED', 'DISMISSED')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS channels (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(100) NOT NULL,
     kind VARCHAR(20) NOT NULL,
+    country_code VARCHAR(3) REFERENCES country_config(code) ON DELETE CASCADE,
     center_location GEOMETRY(Point, 4326),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE channels
+    ADD COLUMN IF NOT EXISTS country_code VARCHAR(3)
+        REFERENCES country_config(code) ON DELETE CASCADE;
+
+CREATE UNIQUE INDEX IF NOT EXISTS channels_country_kind_unique_idx
+    ON channels (country_code, kind)
+    WHERE country_code IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -119,7 +136,7 @@ CREATE TABLE IF NOT EXISTS map_markers (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     category VARCHAR(30) NOT NULL CHECK (
-        category IN ('POWER_OUTAGE', 'WATER_OUTAGE', 'ROAD_HAZARD')
+        category IN ('POWER_OUTAGE', 'WATER_OUTAGE', 'ROAD_HAZARD', 'LOST_ITEM')
     ),
     title VARCHAR(150) NOT NULL,
     description TEXT,

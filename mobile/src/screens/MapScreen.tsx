@@ -11,9 +11,12 @@ import {
   AlertTriangle,
   Camera,
   CheckCircle,
+  ChevronDown,
+  ChevronUp,
   Layers,
   MapPin,
   Mic,
+  Plus,
   Radio,
   ShoppingBag,
   ShieldAlert,
@@ -67,15 +70,18 @@ type SosAlert = {
   id: string;
   title: string;
   status: SosStatus;
+  createdAt?: string;
   coordinates: Coordinates;
   escalationRadiusKm: 3 | 10 | 30;
   emergencyImageUrl?: string;
+  emergencyAudioUrl?: string;
 };
 
 type MarkerCategory =
   | "POWER_OUTAGE"
   | "WATER_OUTAGE"
   | "ROAD_HAZARD"
+  | "LOST_ITEM"
   | "MERCHANT_PRO"
   | "PUBLIC_POI"
   | "MUTUAL_AID"
@@ -109,6 +115,7 @@ const MARKER_CATEGORIES: MarkerCategory[] = [
   "POWER_OUTAGE",
   "WATER_OUTAGE",
   "ROAD_HAZARD",
+  "LOST_ITEM",
   "MERCHANT_PRO",
   "PUBLIC_POI",
   "MUTUAL_AID",
@@ -143,7 +150,7 @@ const MARKER_LAYERS: {
   {
     id: "community",
     label: "Événements & entraide",
-    categories: ["MUTUAL_AID", "COMMUNITY_EVENT"],
+    categories: ["MUTUAL_AID", "COMMUNITY_EVENT", "LOST_ITEM"],
   },
 ];
 
@@ -151,6 +158,7 @@ const MARKER_LABELS: Record<MarkerCategory, string> = {
   POWER_OUTAGE: "Coupure d'électricité",
   WATER_OUTAGE: "Coupure d'eau",
   ROAD_HAZARD: "Incident de voirie",
+  LOST_ITEM: "Objet perdu",
   MERCHANT_PRO: "Commerce de proximité",
   PUBLIC_POI: "Service public",
   MUTUAL_AID: "Entraide",
@@ -161,6 +169,7 @@ const MARKER_EMOJI: Record<MarkerCategory, string> = {
   POWER_OUTAGE: "⚡",
   WATER_OUTAGE: "💧",
   ROAD_HAZARD: "🚧",
+  LOST_ITEM: "🔎",
   MERCHANT_PRO: "🛍️",
   PUBLIC_POI: "📍",
   MUTUAL_AID: "🤝",
@@ -226,12 +235,20 @@ const normalizeSos = (
     id,
     title: String(value.title ?? value.emergency_type ?? existing?.title ?? "Alerte SOS"),
     status: status === "CLOSED" ? "CLOSED" : "ACTIVE",
+    createdAt:
+      typeof value.created_at === "string"
+        ? value.created_at
+        : existing?.createdAt,
     coordinates,
     escalationRadiusKm,
     emergencyImageUrl:
       typeof value.emergency_image_url === "string"
         ? value.emergency_image_url
         : existing?.emergencyImageUrl,
+    emergencyAudioUrl:
+      typeof value.emergency_audio_url === "string"
+        ? value.emergency_audio_url
+        : existing?.emergencyAudioUrl,
   };
 };
 
@@ -245,6 +262,17 @@ const distanceMeters = (from: Coordinates, to: Coordinates): number => {
       Math.cos(radians(to.latitude)) *
       Math.sin(longitudeDelta / 2) ** 2;
   return 6_371_000 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+};
+
+const formatSosTime = (createdAt?: string) => {
+  if (!createdAt) return "Heure indisponible";
+  const elapsedMinutes = Math.max(
+    0,
+    Math.floor((Date.now() - Date.parse(createdAt)) / 60_000),
+  );
+  if (elapsedMinutes < 1) return "À l’instant";
+  if (elapsedMinutes < 60) return `Il y a ${elapsedMinutes} min`;
+  return `Il y a ${Math.floor(elapsedMinutes / 60)} h`;
 };
 
 const normalizeMapMarker = (value: unknown): MapMarker | null => {
@@ -335,6 +363,8 @@ export default function MapScreen() {
   const [initialRegion, setInitialRegion] = useState<Region | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [selectedScope, setSelectedScope] = useState<ScopeMeters>(10000);
+  const [isRadarExpanded, setIsRadarExpanded] = useState(true);
+  const [isActiveAlertsExpanded, setIsActiveAlertsExpanded] = useState(false);
   const [sosAlerts, setSosAlerts] = useState<SosAlert[]>([]);
   const [selectedSosId, setSelectedSosId] = useState<string | null>(null);
   const [mapMarkers, setMapMarkers] = useState<MapMarker[]>([]);
@@ -949,6 +979,8 @@ export default function MapScreen() {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
           emergency_type: "OTHER",
+          accuracy_m: position.coords.accuracy,
+          mocked: position.mocked === true,
           emergency_image_uri: persistentImage.uri,
           ambient_audio_uri: persistentAudio.uri,
         });
@@ -1083,7 +1115,9 @@ export default function MapScreen() {
     }
   };
 
-  const reportOutage = async (category: "POWER_OUTAGE" | "WATER_OUTAGE") => {
+  const createMapReport = async (
+    category: "POWER_OUTAGE" | "WATER_OUTAGE" | "ROAD_HAZARD" | "LOST_ITEM",
+  ) => {
     if (authStatus !== "connected") {
       requestAuthentication();
       return;
@@ -1126,11 +1160,13 @@ export default function MapScreen() {
       ]);
       Alert.alert(
         "Signalement envoyé",
-        "La coupure apparaît en cours de confirmation. Trois validations de voisins à moins de 500 m sont nécessaires.",
+        category === "POWER_OUTAGE" || category === "WATER_OUTAGE"
+          ? "La coupure apparaît en cours de confirmation. Trois validations de voisins à moins de 500 m sont nécessaires."
+          : "Le signalement apparaît maintenant sur la carte.",
       );
     } catch (error) {
       Alert.alert(
-        "Impossible de signaler la coupure",
+        "Impossible d'ajouter ce signalement",
         error instanceof Error ? error.message : "Une erreur est survenue.",
       );
     }
@@ -1188,9 +1224,12 @@ export default function MapScreen() {
   };
 
   const promptOutageReport = () => {
-    Alert.alert("Signaler une coupure", "Quel réseau est interrompu ?", [
-      { text: "Électricité", onPress: () => void reportOutage("POWER_OUTAGE") },
-      { text: "Eau potable", onPress: () => void reportOutage("WATER_OUTAGE") },
+    Alert.alert("Ajouter sur la carte", "Choisissez le type de signalement.", [
+      { text: "Électricité", onPress: () => void createMapReport("POWER_OUTAGE") },
+      { text: "Eau potable", onPress: () => void createMapReport("WATER_OUTAGE") },
+      { text: "Travaux ou danger routier", onPress: () => void createMapReport("ROAD_HAZARD") },
+      { text: "Objet perdu", onPress: () => void createMapReport("LOST_ITEM") },
+      { text: "SOS avec photo ou audio", onPress: () => void openSosCamera() },
       { text: "Annuler", style: "cancel" },
     ]);
   };
@@ -1221,8 +1260,23 @@ export default function MapScreen() {
     if (!userLocation) return "Distance indisponible";
     const meters = distanceMeters(userLocation, alert.coordinates);
     return meters < 1000
-      ? `📍 À ${Math.round(meters / 10) * 10} m de vous`
-      : `📍 À ${(meters / 1000).toFixed(1)} km de vous`;
+      ? `À environ ${Math.max(100, Math.round(meters / 100) * 100)} m`
+      : `À environ ${Math.round(meters / 1000)} km`;
+  };
+
+  const openEmergencyAudio = async (audioUrl: string) => {
+    try {
+      const parsedUrl = new URL(audioUrl);
+      if (parsedUrl.protocol !== "https:") {
+        throw new Error("Le média d'urgence doit utiliser une adresse HTTPS.");
+      }
+      await Linking.openURL(parsedUrl.toString());
+    } catch (error) {
+      Alert.alert(
+        "Audio indisponible",
+        error instanceof Error ? error.message : "Impossible d'ouvrir l'audio d'urgence.",
+      );
+    }
   };
 
   return (
@@ -1302,7 +1356,7 @@ export default function MapScreen() {
                 coordinate={alert.coordinates}
                 onPress={() => setSelectedSosId(alert.id)}
                 title={alert.title}
-                description="Alerte SOS active — position exacte"
+                description="Zone approximative d'une alerte SOS active"
               >
                 <Animated.View
                   style={[
@@ -1378,89 +1432,123 @@ export default function MapScreen() {
       )}
 
       <View style={styles.scopeBar}>
-        <Text style={styles.scopeHeading}>PORTÉE DU RADAR</Text>
-        <ScrollView
-          contentContainerStyle={styles.scopeOptions}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-        >
-          {SCOPE_OPTIONS.map((option) => {
-            const isSelected = selectedScope === option.meters;
-            return (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ selected: isSelected }}
-                key={option.meters}
-                onPress={() => chooseScope(option.meters)}
-                style={[styles.scopeChip, isSelected && styles.scopeChipSelected]}
-              >
-                <Text
-                  style={[
-                    styles.scopeChipText,
-                    isSelected && styles.scopeChipTextSelected,
-                  ]}
-                >
-                  {option.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
         <Pressable
           accessibilityRole="button"
-          onPress={() => setIsLayersVisible(true)}
-          style={styles.layersButton}
+          accessibilityState={{ expanded: isRadarExpanded }}
+          onPress={() => setIsRadarExpanded((expanded) => !expanded)}
+          style={styles.radarHeading}
         >
-          <Layers color="#1d4ed8" size={17} />
-          <Text style={styles.layersButtonText}>Couches de la carte</Text>
-          <Text style={styles.layersCount}>
-            {Object.values(visibleLayers).filter(Boolean).length}/4
-          </Text>
+          <Text style={styles.scopeHeading}>CARTE DU RADAR</Text>
+          {isRadarExpanded ? (
+            <ChevronUp color="#64748b" size={18} />
+          ) : (
+            <ChevronDown color="#64748b" size={18} />
+          )}
         </Pressable>
-        <View style={styles.connectionBadge}>
-          <Radio
-            color={socketState === "connected" ? "#15803d" : "#64748b"}
-            size={14}
-          />
-          <View
-            style={[
-              styles.connectionDot,
-              socketState === "connected" && styles.connectionDotConnected,
-              socketState === "offline" && styles.connectionDotOffline,
-            ]}
-          />
-          <Text style={styles.connectionText}>
-            {socketState === "connected"
-              ? "Radar connecté"
-              : socketState === "connecting"
-                ? "Connexion au radar…"
-                : API_BASE_URL
-                  ? "Radar hors ligne"
-                  : "Serveur non configuré"}
-          </Text>
-        </View>
+        {isRadarExpanded ? (
+          <>
+            <ScrollView
+              contentContainerStyle={styles.scopeOptions}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+            >
+              {SCOPE_OPTIONS.map((option) => {
+                const isSelected = selectedScope === option.meters;
+                return (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
+                    key={option.meters}
+                    onPress={() => chooseScope(option.meters)}
+                    style={[styles.scopeChip, isSelected && styles.scopeChipSelected]}
+                  >
+                    <Text
+                      style={[
+                        styles.scopeChipText,
+                        isSelected && styles.scopeChipTextSelected,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setIsLayersVisible(true)}
+              style={styles.layersButton}
+            >
+              <Layers color="#1d4ed8" size={17} />
+              <Text style={styles.layersButtonText}>Couches de la carte</Text>
+              <Text style={styles.layersCount}>
+                {Object.values(visibleLayers).filter(Boolean).length}/4
+              </Text>
+            </Pressable>
+            <View style={styles.connectionBadge}>
+              <Radio
+                color={socketState === "connected" ? "#15803d" : "#64748b"}
+                size={14}
+              />
+              <View
+                style={[
+                  styles.connectionDot,
+                  socketState === "connected" && styles.connectionDotConnected,
+                  socketState === "offline" && styles.connectionDotOffline,
+                ]}
+              />
+              <Text style={styles.connectionText}>
+                {socketState === "connected"
+                  ? "Radar connecté"
+                  : socketState === "connecting"
+                    ? "Connexion au radar…"
+                    : API_BASE_URL
+                      ? "Radar hors ligne"
+                      : "Serveur non configuré"}
+              </Text>
+            </View>
+          </>
+        ) : null}
       </View>
 
       <View style={styles.radarLegend}>
-        <View style={styles.legendRow}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: isActiveAlertsExpanded }}
+          onPress={() => setIsActiveAlertsExpanded((expanded) => !expanded)}
+          style={styles.alertsHeading}
+        >
           <View style={styles.legendSos} />
-          <Text style={styles.legendText}>SOS actifs · prioritaires</Text>
-        </View>
+          <Text style={styles.legendText}>SOS actifs · {visibleAlerts.length}</Text>
+          {isActiveAlertsExpanded ? (
+            <ChevronDown color="#64748b" size={16} />
+          ) : (
+            <ChevronUp color="#64748b" size={16} />
+          )}
+        </Pressable>
+        {isActiveAlertsExpanded
+          ? visibleAlerts.slice(0, 5).map((alert) => (
+              <Pressable
+                accessibilityRole="button"
+                key={alert.id}
+                onPress={() => setSelectedSosId(alert.id)}
+                style={styles.activeAlertRow}
+              >
+                <Text numberOfLines={1} style={styles.activeAlertCategory}>
+                  {alert.title} · ACTIVE
+                </Text>
+                <Text style={styles.activeAlertDetails}>
+                  {alertDistanceLabel(alert)} · {formatSosTime(alert.createdAt)}
+                </Text>
+              </Pressable>
+            ))
+          : null}
         {markerLoadError && (
           <Text accessibilityRole="alert" style={styles.markerLoadError}>
             {markerLoadError}
           </Text>
         )}
       </View>
-
-      <Pressable
-        accessibilityRole="button"
-        onPress={promptOutageReport}
-        style={styles.reportOutageButton}
-      >
-        <MapPin color="#ffffff" size={17} />
-        <Text style={styles.reportOutageText}>Signaler une coupure</Text>
-      </Pressable>
 
       {selectedSos && (
         <View style={styles.bottomSheet}>
@@ -1501,6 +1589,19 @@ export default function MapScreen() {
               </Text>
             </View>
           )}
+          {selectedSos.emergencyAudioUrl ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                const audioUrl = selectedSos.emergencyAudioUrl;
+                if (audioUrl) void openEmergencyAudio(audioUrl);
+              }}
+              style={styles.assistButton}
+            >
+              <Mic color="#ffffff" size={17} />
+              <Text style={styles.actionButtonText}>Écouter l'audio d'urgence</Text>
+            </Pressable>
+          ) : null}
           <View style={styles.alertActions}>
             <Pressable
               accessibilityRole="button"
@@ -1602,13 +1703,12 @@ export default function MapScreen() {
       )}
 
       <Pressable
-        accessibilityLabel="Créer une alerte SOS avec photo et audio en direct"
+        accessibilityLabel="Ajouter un signalement ou une alerte sur la carte"
         accessibilityRole="button"
-        onPress={() => void openSosCamera()}
-        style={styles.evidenceFab}
+        onPress={promptOutageReport}
+        style={styles.addMarkerFab}
       >
-        <Camera color="#ffffff" size={18} />
-        <Text style={styles.evidenceFabText}>Ajouter photo/audio</Text>
+        <Plus color="#ffffff" size={26} />
       </Pressable>
       {authStatus === "connected" ? (
         <SosButton
@@ -1915,7 +2015,12 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800",
     letterSpacing: 0.8,
-    marginBottom: 9,
+  },
+  radarHeading: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 30,
   },
   scopeOptions: {
     alignItems: "center",
@@ -2033,12 +2138,28 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     bottom: 102,
     elevation: 3,
-    gap: 8,
+    gap: 7,
     left: 14,
     paddingHorizontal: 11,
     paddingVertical: 10,
     position: "absolute",
   },
+  alertsHeading: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 7,
+    justifyContent: "space-between",
+    minHeight: 28,
+  },
+  activeAlertRow: {
+    borderTopColor: "#e2e8f0",
+    borderTopWidth: 1,
+    gap: 3,
+    maxWidth: 245,
+    paddingTop: 7,
+  },
+  activeAlertCategory: { color: "#334155", fontSize: 11, fontWeight: "700" },
+  activeAlertDetails: { color: "#64748b", fontSize: 10 },
   legendRow: {
     alignItems: "center",
     flexDirection: "row",
@@ -2257,29 +2378,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
   },
-  reportOutageButton: {
-    alignItems: "center",
-    backgroundColor: "#1d4ed8",
-    borderRadius: 14,
-    bottom: 32,
-    elevation: 5,
-    flexDirection: "row",
-    gap: 7,
-    left: 14,
-    minHeight: 48,
-    paddingHorizontal: 13,
-    position: "absolute",
-    shadowColor: "#1e3a8a",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    zIndex: 2,
-  },
-  reportOutageText: {
-    color: "#ffffff",
-    fontSize: 11,
-    fontWeight: "800",
-  },
   fakeReportText: {
     color: "#b91c1c",
     fontSize: 10,
@@ -2371,24 +2469,17 @@ const styles = StyleSheet.create({
     backgroundColor: "#1d4ed8",
     borderColor: "#1d4ed8",
   },
-  evidenceFab: {
+  addMarkerFab: {
     alignItems: "center",
-    backgroundColor: "#1e3a8a",
-    borderRadius: 22,
-    bottom: 84,
+    backgroundColor: "#1d4ed8",
+    borderRadius: 30,
+    bottom: 24,
     elevation: 5,
-    flexDirection: "row",
-    gap: 7,
+    height: 58,
     justifyContent: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 11,
+    left: 20,
     position: "absolute",
-    right: 20,
-  },
-  evidenceFabText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "700",
+    width: 58,
   },
   cameraModal: {
     backgroundColor: "#020617",

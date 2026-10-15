@@ -1,19 +1,29 @@
 import * as SMS from "expo-sms";
+import * as ImagePicker from "expo-image-picker";
+import {
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+} from "expo-audio";
 import * as Location from "expo-location";
 import NetInfo from "@react-native-community/netinfo";
-import { ShieldAlert, X } from "lucide-react-native";
+import { Camera, Mic, ShieldAlert, X } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Modal,
   Pressable,
   StyleSheet,
   Text,
+  Vibration,
   View,
 } from "react-native";
 import type { Socket } from "socket.io-client";
 import { openProfileStore } from "../storage/profileStore";
+import { uploadEmergencyMedia } from "../services/uploadEmergencyMedia";
 
 export type SosCoordinates = {
   latitude: number;
@@ -27,6 +37,19 @@ type SosButtonProps = {
   socket: Socket | null;
   onAlert: (payload: unknown) => void;
   openRequestId?: string;
+};
+
+type TrackingAlert = {
+  id: string;
+  relaysNotified: number;
+  createdAt: number;
+  mediaWarning?: string;
+};
+
+type EmergencyPhoto = {
+  uri: string;
+  filename: string;
+  mimeType: string;
 };
 
 const EMERGENCY_TYPES: { id: EmergencyType; label: string; emoji: string }[] = [
@@ -51,10 +74,19 @@ export default function SosButton({
   openRequestId,
 }: SosButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [emergencyType, setEmergencyType] = useState<EmergencyType>("MEDICAL");
+  const [emergencyType, setEmergencyType] = useState<EmergencyType | null>(null);
   const [escalationLevel, setEscalationLevel] = useState(1);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [hasSeenGuidance, setHasSeenGuidance] = useState(false);
+  const [isTrainingMode, setIsTrainingMode] = useState(false);
+  const [trackingAlert, setTrackingAlert] = useState<TrackingAlert | null>(null);
+  const [cancelSeconds, setCancelSeconds] = useState(0);
+  const [emergencyPhoto, setEmergencyPhoto] = useState<EmergencyPhoto | null>(null);
+  const [emergencyAudioUri, setEmergencyAudioUri] = useState<string | null>(null);
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
   useEffect(() => {
     if (openRequestId) setIsOpen(true);
@@ -77,15 +109,21 @@ export default function SosButton({
       throw new Error("Le compositeur SMS n'est pas disponible sur cet appareil.");
     }
 
-    const emergencyLabel =
-      EMERGENCY_TYPES.find((item) => item.id === emergencyType)?.label ??
-      "Urgence";
+    const emergencyLabel = EMERGENCY_TYPES.find(
+      (item) => item.id === emergencyType,
+    )?.label;
+    if (!emergencyLabel) {
+      throw new Error("Choisissez le type d'urgence avant de lancer le SOS.");
+    }
     const mapsLink = `https://www.google.com/maps?q=${coordinates.latitude},${coordinates.longitude}`;
     const message = [
       `SOS QuartierPlus — urgence ${emergencyLabel.toLowerCase()}.`,
       "J'ai besoin d'assistance. Ma position GPS :",
       `${coordinates.latitude}, ${coordinates.longitude}`,
       mapsLink,
+      ...(emergencyPhoto || emergencyAudioUri
+        ? ["Les photos et audios joints ne sont pas transmis par SMS."]
+        : []),
     ].join("\n");
     const result = await SMS.sendSMSAsync(recipients, message);
     if (result.result === "cancelled") {
@@ -101,11 +139,105 @@ export default function SosButton({
         "Le compositeur SMS s'est ouvert. Vérifiez les destinataires puis appuyez sur Envoyer pour transmettre votre alerte.",
       );
     }
-  }, [emergencyType]);
+  }, [emergencyAudioUri, emergencyPhoto, emergencyType]);
+
+  const chooseEmergencyPhoto = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        throw new Error("L'accès à la photothèque est nécessaire pour joindre une photo.");
+      }
+      const selection = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 0.8,
+      });
+      if (selection.canceled) return;
+      const asset = selection.assets[0];
+      if (!asset?.uri) throw new Error("La photo sélectionnée est indisponible.");
+      setEmergencyPhoto({
+        uri: asset.uri,
+        filename: asset.fileName ?? `sos-${Date.now()}.jpg`,
+        mimeType: asset.mimeType ?? "image/jpeg",
+      });
+      setMediaError(null);
+    } catch (error) {
+      const message = errorMessage(error);
+      setMediaError(message);
+      Alert.alert("Photo indisponible", message);
+    }
+  };
+
+  const stopAudioRecording = async () => {
+    if (!audioRecorder.isRecording) return;
+    await audioRecorder.stop();
+    setIsRecordingAudio(false);
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+    if (audioRecorder.uri) {
+      setEmergencyAudioUri(audioRecorder.uri);
+      setMediaError(null);
+    } else {
+      throw new Error("Aucun fichier audio n'a été enregistré.");
+    }
+  };
+
+  const toggleAudioRecording = async () => {
+    if (isRecordingAudio) {
+      try {
+        await stopAudioRecording();
+      } catch (error) {
+        const message = errorMessage(error);
+        setMediaError(message);
+        Alert.alert("Audio indisponible", message);
+      }
+      return;
+    }
+    try {
+      const permission = await requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        throw new Error("L'accès au microphone est nécessaire pour joindre un audio.");
+      }
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
+      setIsRecordingAudio(true);
+      setEmergencyAudioUri(null);
+      setMediaError(null);
+      setTimeout(() => {
+        if (audioRecorder.isRecording) {
+          void stopAudioRecording().catch((error: unknown) => {
+            const message = errorMessage(error);
+            setMediaError(message);
+            Alert.alert("Audio indisponible", message);
+          });
+        }
+      }, 10_000);
+    } catch (error) {
+      const message = errorMessage(error);
+      setMediaError(message);
+      Alert.alert("Audio indisponible", message);
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+    }
+  };
 
   const triggerSos = useCallback(async () => {
+    if (isTrainingMode) {
+      setIsOpen(false);
+      Alert.alert(
+        "Mode entraînement",
+        "Simulation terminée : aucun relais, voisin ou service de secours n'a été prévenu.",
+      );
+      return;
+    }
     if (!location) {
       Alert.alert("Position indisponible", "Impossible de déterminer votre position GPS.");
+      return;
+    }
+    if (!emergencyType) {
+      Alert.alert(
+        "Type d'urgence requis",
+        "Choisissez une catégorie avant de lancer le SOS.",
+      );
       return;
     }
     setIsSending(true);
@@ -116,10 +248,22 @@ export default function SosButton({
       if (position.mocked === true) {
         throw new Error("La position GPS est signalée comme simulée.");
       }
+      if (
+        typeof position.coords.accuracy !== "number" ||
+        !Number.isFinite(position.coords.accuracy) ||
+        position.coords.accuracy > 200
+      ) {
+        throw new Error(
+          "La précision GPS doit être de 200 m ou meilleure. Déplacez-vous à l'extérieur et réessayez.",
+        );
+      }
       const coordinates = {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
       };
+      if (isRecordingAudio) {
+        await stopAudioRecording();
+      }
       const networkState = await NetInfo.fetch();
       const hasDataConnection =
         networkState.isConnected === true &&
@@ -127,6 +271,8 @@ export default function SosButton({
       if (!hasDataConnection) {
         await sendOfflineSms(coordinates);
         setIsOpen(false);
+        setEmergencyPhoto(null);
+        setEmergencyAudioUri(null);
         return;
       }
       if (!socket?.connected) {
@@ -135,6 +281,33 @@ export default function SosButton({
         );
       }
 
+      let emergencyImageUrl: string | undefined;
+      let emergencyAudioUrl: string | undefined;
+      const mediaWarnings: string[] = [];
+      if (emergencyPhoto) {
+        try {
+          emergencyImageUrl = await uploadEmergencyMedia(
+            emergencyPhoto.uri,
+            emergencyPhoto.filename,
+            emergencyPhoto.mimeType,
+            "image",
+          );
+        } catch (error) {
+          mediaWarnings.push(errorMessage(error));
+        }
+      }
+      if (emergencyAudioUri) {
+        try {
+          emergencyAudioUrl = await uploadEmergencyMedia(
+            emergencyAudioUri,
+            `sos-${Date.now()}.m4a`,
+            "audio/mp4",
+            "video",
+          );
+        } catch (error) {
+          mediaWarnings.push(errorMessage(error));
+        }
+      }
       const result = await new Promise<unknown>((resolve, reject) => {
         socket.timeout(8000).emit(
           "sos:trigger",
@@ -143,6 +316,10 @@ export default function SosButton({
             longitude: coordinates.longitude,
             emergency_type: emergencyType,
             escalation_level: escalationLevel,
+            accuracy_m: position.coords.accuracy,
+            mocked: position.mocked === true,
+            emergency_image_url: emergencyImageUrl,
+            emergency_audio_url: emergencyAudioUrl,
           },
           (timeoutError: Error | null, acknowledgement: unknown) => {
             if (timeoutError) {
@@ -161,15 +338,58 @@ export default function SosButton({
             : "Le serveur n'a pas confirmé la réception de l'alerte.";
         throw new Error(message);
       }
-      if ("alert" in result) onAlert(result.alert);
+      let alertId = "";
+      if ("alert" in result) {
+        onAlert(result.alert);
+        if (
+          result.alert &&
+          typeof result.alert === "object" &&
+          "id" in result.alert &&
+          typeof result.alert.id === "string"
+        ) {
+          alertId = result.alert.id;
+        }
+      }
       setIsOpen(false);
-      Alert.alert("Alerte SOS envoyée", "Votre alerte a été transmise aux voisins proches.");
+      setEmergencyPhoto(null);
+      setEmergencyAudioUri(null);
+      if (alertId) {
+        setTrackingAlert({
+          id: alertId,
+          relaysNotified:
+            "relays_notified" in result && typeof result.relays_notified === "number"
+              ? result.relays_notified
+              : 0,
+          createdAt: Date.now(),
+          mediaWarning: mediaWarnings.length > 0
+            ? `Alerte envoyée sans média : ${mediaWarnings.join(" ")}`
+            : undefined,
+        });
+        setCancelSeconds(10);
+      } else {
+        Alert.alert(
+          "Alerte SOS envoyée",
+          "Votre alerte a été transmise aux voisins proches.",
+        );
+      }
     } catch (error) {
       Alert.alert("Envoi du SOS impossible", errorMessage(error));
     } finally {
       setIsSending(false);
     }
-  }, [emergencyType, escalationLevel, location, onAlert, sendOfflineSms, socket]);
+  }, [
+    audioRecorder,
+    emergencyAudioUri,
+    emergencyPhoto,
+    emergencyType,
+    escalationLevel,
+    isRecordingAudio,
+    isTrainingMode,
+    location,
+    onAlert,
+    sendOfflineSms,
+    socket,
+  ]);
 
   useEffect(() => {
     if (countdown === null) return undefined;
@@ -185,10 +405,144 @@ export default function SosButton({
     return () => clearTimeout(timer);
   }, [countdown, triggerSos]);
 
+  const resolveTrackingAlert = useCallback(async () => {
+    const alert = trackingAlert;
+    if (!alert || !socket?.connected) {
+      Alert.alert(
+        "Connexion indisponible",
+        "L'alerte reste active. Rétablissez la connexion pour la clôturer.",
+      );
+      return;
+    }
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.timeout(8000).emit(
+          "sos:resolve",
+          { id: alert.id },
+          (timeoutError: Error | null, response: unknown) => {
+            if (timeoutError) {
+              reject(new Error("Le serveur n'a pas confirmé la clôture."));
+              return;
+            }
+            if (
+              !response ||
+              typeof response !== "object" ||
+              !("ok" in response) ||
+              response.ok !== true
+            ) {
+              reject(
+                new Error(
+                  response &&
+                    typeof response === "object" &&
+                    "error" in response &&
+                    typeof response.error === "string"
+                    ? response.error
+                    : "Le serveur a refusé la clôture.",
+                ),
+              );
+              return;
+            }
+            resolve();
+          },
+        );
+      });
+      setTrackingAlert(null);
+      setCancelSeconds(0);
+      Alert.alert("Alerte clôturée", "Merci d'avoir confirmé que vous êtes en sécurité.");
+    } catch (error) {
+      Alert.alert("Impossible de clôturer l'alerte", errorMessage(error));
+    }
+  }, [socket, trackingAlert]);
+
+  const cancelTrackingAlert = useCallback(async () => {
+    const alert = trackingAlert;
+    if (!alert || cancelSeconds === 0 || !socket?.connected) return;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.timeout(8000).emit(
+          "sos:cancel",
+          { id: alert.id },
+          (timeoutError: Error | null, response: unknown) => {
+            if (timeoutError) {
+              reject(new Error("Le serveur n'a pas confirmé l'annulation."));
+              return;
+            }
+            if (
+              !response ||
+              typeof response !== "object" ||
+              !("ok" in response) ||
+              response.ok !== true
+            ) {
+              reject(
+                new Error(
+                  response &&
+                    typeof response === "object" &&
+                    "error" in response &&
+                    typeof response.error === "string"
+                    ? response.error
+                    : "Le serveur a refusé l'annulation.",
+                ),
+              );
+              return;
+            }
+            resolve();
+          },
+        );
+      });
+      setTrackingAlert(null);
+      setCancelSeconds(0);
+    } catch (error) {
+      Alert.alert("Impossible d'annuler le SOS", errorMessage(error));
+    }
+  }, [cancelSeconds, socket, trackingAlert]);
+
+  const openEmergencyCall = async () => {
+    try {
+      await Linking.openURL("tel:112");
+    } catch (error) {
+      Alert.alert(
+        "Appel indisponible",
+        `Impossible d'ouvrir l'appel d'urgence : ${errorMessage(error)}`,
+      );
+    }
+  };
+
+  useEffect(() => {
+    if (!trackingAlert) return undefined;
+    const interval = setInterval(() => {
+      setCancelSeconds((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+    const safetyTimer = setTimeout(() => {
+      Alert.alert(
+        "Êtes-vous en sécurité ?",
+        "Votre alerte SOS est toujours active. Si vous êtes en danger, contactez directement les secours.",
+        [
+          { text: "Non, j'ai besoin d'aide", style: "destructive" },
+          {
+            text: "Oui, je suis en sécurité",
+            onPress: () => void resolveTrackingAlert(),
+          },
+        ],
+      );
+    }, Math.max(0, trackingAlert.createdAt + 10 * 60_000 - Date.now()));
+    return () => {
+      clearInterval(interval);
+      clearTimeout(safetyTimer);
+    };
+  }, [resolveTrackingAlert, trackingAlert]);
+
   const close = () => {
     if (isSending) return;
+    if (audioRecorder.isRecording) {
+      void stopAudioRecording().catch((error: unknown) => {
+        console.error("Unable to stop cancelled SOS audio recording:", error);
+      });
+    }
     setCountdown(null);
     setIsOpen(false);
+    setEmergencyPhoto(null);
+    setEmergencyAudioUri(null);
+    setMediaError(null);
   };
 
   return (
@@ -196,7 +550,26 @@ export default function SosButton({
       <Pressable
         accessibilityLabel="Déclencher une alerte SOS"
         accessibilityRole="button"
-        onPress={() => setIsOpen(true)}
+        onPress={() => {
+          if (hasSeenGuidance) {
+            setIsOpen(true);
+            return;
+          }
+          Alert.alert(
+            "Quand utiliser le SOS",
+            "Utilisez-le uniquement en cas de danger réel nécessitant une aide urgente. Votre position exacte sera transmise aux relais prévenus. Le niveau de confiance dépend du téléphone vérifié et des confirmations reçues.",
+            [
+              { text: "Annuler", style: "cancel" },
+              {
+                text: "Compris",
+                onPress: () => {
+                  setHasSeenGuidance(true);
+                  setIsOpen(true);
+                },
+              },
+            ],
+          );
+        }}
         style={styles.fab}
       >
         <ShieldAlert color="#ffffff" size={25} />
@@ -281,18 +654,86 @@ export default function SosButton({
                     );
                   })}
                 </View>
+                <Text style={styles.sectionLabel}>Média facultatif</Text>
+                <View style={styles.mediaActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void chooseEmergencyPhoto()}
+                    style={styles.mediaButton}
+                  >
+                    <Camera color="#1d4ed8" size={17} />
+                    <Text style={styles.mediaButtonText}>
+                      {emergencyPhoto ? "Changer la photo" : "Ajouter une photo"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void toggleAudioRecording()}
+                    style={styles.mediaButton}
+                  >
+                    <Mic color={isRecordingAudio ? "#dc2626" : "#1d4ed8"} size={17} />
+                    <Text style={styles.mediaButtonText}>
+                      {isRecordingAudio
+                        ? "Arrêter l'audio"
+                        : emergencyAudioUri
+                          ? "Refaire l'audio"
+                          : "Enregistrer un audio"}
+                    </Text>
+                  </Pressable>
+                </View>
+                {emergencyPhoto ? (
+                  <Text style={styles.mediaStatus}>Photo jointe à l'alerte</Text>
+                ) : null}
+                {emergencyAudioUri ? (
+                  <Text style={styles.mediaStatus}>Audio joint à l'alerte · 10 s maximum</Text>
+                ) : null}
+                {mediaError ? (
+                  <Text accessibilityRole="alert" style={styles.mediaError}>
+                    {mediaError}
+                  </Text>
+                ) : null}
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: isTrainingMode }}
+                  onPress={() => setIsTrainingMode((enabled) => !enabled)}
+                  style={styles.trainingOption}
+                >
+                  <View
+                    style={[
+                      styles.trainingCheckbox,
+                      isTrainingMode && styles.trainingCheckboxSelected,
+                    ]}
+                  />
+                  <Text style={styles.trainingText}>
+                    MODE ENTRAÎNEMENT — aucun relais ne sera prévenu
+                  </Text>
+                </Pressable>
                 <Pressable
                   accessibilityRole="button"
-                  disabled={!location}
-                  onPress={() => setCountdown(3)}
-                  style={[styles.trigger, !location && styles.disabled]}
+                  disabled={!location || !emergencyType || isRecordingAudio}
+                  delayLongPress={2000}
+                  onLongPress={() => {
+                    if (!location || !emergencyType || isRecordingAudio) return;
+                    Vibration.vibrate(100);
+                    setCountdown(10);
+                  }}
+                  style={[
+                    styles.trigger,
+                    (!location || !emergencyType || isRecordingAudio) && styles.disabled,
+                  ]}
                 >
                   <ShieldAlert color="#ffffff" size={19} />
-                  <Text style={styles.triggerText}>Lancer le compte à rebours</Text>
+                  <Text style={styles.triggerText}>
+                    Maintenir 2 s pour demander de l'aide
+                  </Text>
                 </Pressable>
-                {!location && (
+                {(!location || !emergencyType || isRecordingAudio) && (
                   <Text style={styles.locationNotice}>
-                    En attente de la position GPS...
+                    {isRecordingAudio
+                      ? "Arrêtez l'enregistrement audio avant de lancer le SOS."
+                      : !emergencyType
+                      ? "Choisissez une catégorie avant de lancer le SOS."
+                      : "En attente de la position GPS..."}
                   </Text>
                 )}
               </>
@@ -309,7 +750,9 @@ export default function SosButton({
                   <>
                     <Text style={styles.countdownValue}>{countdown ?? 0}</Text>
                     <Text style={styles.countdownDescription}>
-                      Votre alerte sera envoyée dans {countdown ?? 0} seconde{countdown === 1 ? "" : "s"}.
+                      {countdown === null
+                        ? "Transmission de votre alerte..."
+                        : `Votre SOS sera transmis dans ${countdown} s. Vous pouvez encore l'annuler sans pénalité.`}
                     </Text>
                     <Pressable
                       accessibilityRole="button"
@@ -322,6 +765,56 @@ export default function SosButton({
                 )}
               </View>
             )}
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        animationType="slide"
+        onRequestClose={() => undefined}
+        transparent
+        visible={trackingAlert !== null}
+      >
+        <View style={styles.backdrop}>
+          <View style={styles.dialog}>
+            <Text style={styles.title}>Suivi de votre alerte SOS</Text>
+            <Text style={styles.subtitle}>
+              {trackingAlert?.relaysNotified
+                ? `${trackingAlert.relaysNotified} relais prévenu(s). Les réponses arrivent au fur et à mesure.`
+                : "Alerte transmise aux relais proches. Leurs réponses arrivent au fur et à mesure."}
+            </Text>
+            {trackingAlert?.mediaWarning ? (
+              <Text accessibilityRole="alert" style={styles.mediaError}>
+                {trackingAlert.mediaWarning}
+              </Text>
+            ) : null}
+            <Text style={styles.trustExplanation}>
+              Le niveau de confiance évolue selon les confirmations des relais et ne remplace pas l'évaluation des secours.
+            </Text>
+            {cancelSeconds > 0 ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void cancelTrackingAlert()}
+                style={styles.cancel}
+              >
+                <Text style={styles.cancelText}>
+                  Annuler sans pénalité · {cancelSeconds} s
+                </Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => void openEmergencyCall()}
+              style={styles.callButton}
+            >
+              <Text style={styles.callButtonText}>Appeler les secours · 112</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => void resolveTrackingAlert()}
+              style={styles.safeButton}
+            >
+              <Text style={styles.safeButtonText}>Je suis en sécurité · clôturer</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -379,10 +872,24 @@ const styles = StyleSheet.create({
   radiusOptionSelected: { backgroundColor: "#fff7ed", borderColor: "#f97316" },
   radiusText: { color: "#475569", fontSize: 14, fontWeight: "600" },
   radiusTextSelected: { color: "#c2410c" },
+  mediaActions: { flexDirection: "row", gap: 8 },
+  mediaButton: { alignItems: "center", backgroundColor: "#eff6ff", borderRadius: 10, flex: 1, flexDirection: "row", gap: 6, justifyContent: "center", minHeight: 44, paddingHorizontal: 6 },
+  mediaButtonText: { color: "#1e3a8a", fontSize: 11, fontWeight: "700", textAlign: "center" },
+  mediaStatus: { color: "#15803d", fontSize: 12, marginTop: 6 },
+  mediaError: { color: "#b91c1c", fontSize: 12, lineHeight: 17, marginTop: 8 },
   trigger: { alignItems: "center", backgroundColor: "#dc2626", borderRadius: 12, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 24, minHeight: 52, paddingHorizontal: 12 },
   triggerText: { color: "#ffffff", fontSize: 15, fontWeight: "800" },
   disabled: { opacity: 0.5 },
   locationNotice: { color: "#b91c1c", fontSize: 12, marginTop: 10, textAlign: "center" },
+  trainingOption: { alignItems: "center", flexDirection: "row", gap: 9, marginTop: 14 },
+  trainingCheckbox: { borderColor: "#94a3b8", borderRadius: 4, borderWidth: 1, height: 18, width: 18 },
+  trainingCheckboxSelected: { backgroundColor: "#1d4ed8", borderColor: "#1d4ed8" },
+  trainingText: { color: "#1e3a8a", flex: 1, fontSize: 12, fontWeight: "700" },
+  trustExplanation: { color: "#475569", fontSize: 13, lineHeight: 19, marginTop: 14 },
+  callButton: { alignItems: "center", backgroundColor: "#dc2626", borderRadius: 12, marginTop: 14, padding: 15 },
+  callButtonText: { color: "#ffffff", fontSize: 15, fontWeight: "800" },
+  safeButton: { alignItems: "center", backgroundColor: "#15803d", borderRadius: 12, marginTop: 9, padding: 15 },
+  safeButtonText: { color: "#ffffff", fontSize: 14, fontWeight: "700" },
   countdownPanel: { alignItems: "center", paddingBottom: 8, paddingTop: 22 },
   countdownValue: { color: "#dc2626", fontSize: 72, fontWeight: "800", lineHeight: 82 },
   countdownDescription: { color: "#475569", fontSize: 14, marginBottom: 24, marginTop: 6, textAlign: "center" },

@@ -9,11 +9,10 @@
 - Base requise : PostgreSQL avec les extensions `uuid-ossp` et **PostGIS**. Le
   schéma utilise des colonnes spatiales ; PostgreSQL seul ne suffit pas.
 - `GET /health` répond immédiatement avec le statut, le commit Render et la
-  version du contrat API. Il ne dépend pas d'une connexion PostgreSQL, afin que
-  Render puisse vérifier le démarrage avant les opérations de base de données.
+  version du contrat API sans effectuer de requête SQL. Au démarrage, l'API
+  attend toutefois la création idempotente des canaux publics par pays.
 - Le démarrage (`npm start`) n'exécute pas de migration. Sur une base existante,
-  exécutez `migrations/010_mobile_api_contract.sql` avant de déployer le code
-  qui utilise les nouveaux marqueurs, conversations et annonces.
+  appliquez les migrations manquantes ci-dessous avant de déployer le code.
 - L'historique Git, les configurations, les README et les workflows examinés
   ne montrent pas d'hébergeur backend déjà utilisé. Les workflows existants
   concernent les builds mobiles et EAS.
@@ -37,14 +36,21 @@ Puis exécutez, sans supprimer de table ni de données, dans cet ordre :
 1. `server/db/init.sql`
 2. `server/db/country-config-radius-migration.sql`
 3. `server/db/auth-migration.sql`
-4. `server/db/seeds.sql`
-5. `migrations/005_monetization_fedapay.sql`
-6. `migrations/006_pro_selected_features.sql`
-7. `migrations/007_events_ticketing.sql`
-8. `server/db/posts-migration.sql`
-9. `migrations/008_posts_text_only_fallback.sql`
-10. `migrations/009_sos_assists.sql`
-11. `migrations/010_mobile_api_contract.sql`
+4. `server/db/notifications-migration.sql`
+5. `server/db/posts-migration.sql`
+6. `server/db/push-tokens-migration.sql`
+7. `server/db/sos-emergency-type-migration.sql`
+8. `migrations/005_monetization_fedapay.sql`
+9. `migrations/006_pro_selected_features.sql`
+10. `migrations/007_events_ticketing.sql`
+11. `migrations/008_posts_text_only_fallback.sql`
+12. `migrations/009_sos_assists.sql`
+13. `migrations/010_mobile_api_contract.sql`
+14. `migrations/011_country_channels.sql`
+15. `migrations/012_sos_moderation_queue.sql`
+16. `migrations/013_map_lost_items.sql`
+17. `migrations/014_sos_audio_media.sql`
+18. `server/db/seeds.sql`
 
 Pour une base Neon neuve, exécutez chaque fichier une seule fois dans l'éditeur
 SQL, dans cet ordre. `auth-migration.sql` utilise des opérations idempotentes
@@ -62,6 +68,13 @@ exécutez-la uniquement après `posts-migration.sql`. La migration 009 ajoute le
 confirmations d’aide aux alertes SOS. La migration 010 ajoute les marqueurs
 cartographiques, les conversations privées et le type d'annonce; elle est
 idempotente et doit être appliquée avant le déploiement du contrat API v2.
+La migration 011 ajoute l'identifiant de pays et l'unicité nécessaires aux
+canaux par défaut ; 012 enregistre les alertes récentes de comptes à modérer ;
+013 autorise les signalements « Objet perdu » et 014 ajoute le média audio
+d'urgence facultatif. Le seed doit être appliqué après 011 afin que les deux
+canaux soient créés pour chaque pays. Au démarrage, le
+serveur les upsert à nouveau pour réparer les canaux manquants sans produire
+de 404 pour un compte n'ayant encore aucune conversation.
 
 ## 2. Créer le service web Render
 
