@@ -12,6 +12,7 @@ import {
   getApiCache,
   setApiCache,
 } from "./db";
+import { ensureServerContract } from "./serverContract";
 
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/, "");
 export const API_TIMEOUT_MS = 60_000;
@@ -97,6 +98,14 @@ const api = axios.create({
 });
 
 api.interceptors.request.use(async (config: CachedRequestConfig) => {
+  if (
+    config.method?.toLowerCase() === "get" &&
+    config.url !== "/health" &&
+    !config.url?.endsWith("/health") &&
+    await getNetworkStatus()
+  ) {
+    await ensureServerContract();
+  }
   const token = await getStoredAuthToken();
   if (token) {
     config.headers.set("Authorization", `Bearer ${token}`);

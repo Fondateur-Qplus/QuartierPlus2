@@ -4,39 +4,45 @@ import { getMonetizationConfig } from "./controllers/eventsController.js";
 import { pool } from "./db/pool.js";
 import authRoutes from "./routes/authRoutes.js";
 import channelRoutes from "./routes/channelRoutes.js";
+import conversationRoutes from "./routes/conversationRoutes.js";
 import eventsRoutes from "./routes/eventsRoutes.js";
 import livekitRoutes from "./routes/livekitRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
+import mapRoutes from "./routes/mapRoutes.js";
+import marketplaceRoutes from "./routes/marketplaceRoutes.js";
 import postsRoutes from "./routes/postsRoutes.js";
 import proRoutes from "./routes/proRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
+import publicMapRoutes from "./routes/publicMapRoutes.js";
+import reportRoutes from "./routes/reportRoutes.js";
+import restSosRoutes from "./routes/restSosRoutes.js";
 import sosRoutes from "./routes/sosRoutes.js";
 import ticketsRoutes from "./routes/ticketsRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import { createServer } from "node:http";
 import { attachSocketServer } from "./sockets/index.js";
+import { handleHealth } from "./health.js";
 
 const app = express();
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: "32kb" }));
-app.get("/health", async (_request, response, next) => {
-  try {
-    await pool.query("SELECT 1");
-    return response.status(200).json({ status: "ok" });
-  } catch (error) {
-    return next(error);
-  }
-});
+app.get("/health", handleHealth);
 app.get(
   ["/api/v1/monetization/config", "/v1/monetization/config"],
   getMonetizationConfig,
 );
 app.use(["/api/v1/public", "/v1/public"], publicRoutes);
+app.use(["/api/v1/public/map", "/v1/public/map"], publicMapRoutes);
 app.use(["/api/v1", "/v1"], postsRoutes);
 app.use(["/api/v1/sos", "/v1/sos"], sosRoutes);
+app.use(["/api/v1/sos", "/v1/sos"], restSosRoutes);
 app.use(["/api/v1/auth", "/v1/auth"], authRoutes);
 app.use(["/api/v1/channels", "/v1/channels"], channelRoutes);
+app.use(["/api/v1/conversations", "/v1/conversations"], conversationRoutes);
+app.use(["/api/v1/map", "/v1/map"], mapRoutes);
+app.use(["/api/v1/marketplace", "/v1/marketplace"], marketplaceRoutes);
+app.use(["/api/v1/reports", "/v1/reports"], reportRoutes);
 app.use(["/api/v1/events", "/v1/events"], eventsRoutes);
 app.use(["/api/v1/livekit", "/v1/livekit"], livekitRoutes);
 app.use(["/api/v1/payments", "/v1/payments"], paymentRoutes);

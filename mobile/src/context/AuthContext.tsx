@@ -1,4 +1,5 @@
 import NetInfo from "@react-native-community/netinfo";
+import { File } from "expo-file-system";
 import {
   createContext,
   useCallback,
@@ -31,6 +32,7 @@ import {
   registerPushNotifications,
   unregisterPushNotifications,
 } from "../services/notifications";
+import { uploadMarketplaceImage } from "../services/uploadMarketplaceImage";
 
 export type AuthUser = {
   id: string;
@@ -83,53 +85,45 @@ const actionEndpoint = (action: SyncAction) => {
   throw new Error(`Type d'action hors ligne non pris en charge: ${action.actionType}`);
 };
 
-const buildQueuedRequestBody = (action: SyncAction): FormData => {
-  const formData = new FormData();
-  const appendFile = (field: string, uri: unknown, filename: string, type: string) => {
-    if (typeof uri !== "string" || !uri) return;
-    const file = { uri, name: filename, type };
-    const nativeFormData = formData as FormData & {
-      append: (name: string, value: string | typeof file) => void;
-    };
-    nativeFormData.append(field, file);
-  };
-
+const buildQueuedRequestBody = async (action: SyncAction) => {
   if (action.actionType === "create_post") {
-    for (const [key, value] of Object.entries(action.payload)) {
-      if (key === "image_uri" || value === undefined || value === null) continue;
-      formData.append(
-        key,
-        typeof value === "string" ? value : JSON.stringify(value),
-      );
+    const imageUri =
+      typeof action.payload.image_uri === "string"
+        ? action.payload.image_uri
+        : null;
+    const mediaPublicId = imageUri
+      ? await uploadMarketplaceImage(
+          imageUri,
+          new File(imageUri).size,
+          `marketplace-offline-${action.id}.webp`,
+        )
+      : undefined;
+    const locationValue = action.payload.location;
+    let location: unknown = locationValue;
+    if (typeof locationValue === "string") {
+      try {
+        location = JSON.parse(locationValue) as unknown;
+      } catch {
+        throw new Error("La position de l'annonce hors ligne est invalide.");
+      }
     }
-    appendFile(
-      "image",
-      action.payload.image_uri,
-      `marketplace-offline-${action.id}.webp`,
-      "image/webp",
-    );
-    return formData;
+    const isFree = action.payload.is_free === "true";
+    return {
+      title: String(action.payload.title ?? ""),
+      description: String(action.payload.description ?? ""),
+      category: String(action.payload.category ?? ""),
+      item_type: String(action.payload.item_type ?? "listing"),
+      is_free: isFree,
+      price: isFree ? 0 : Number(action.payload.price),
+      location,
+      ...(mediaPublicId ? { media_public_id: mediaPublicId } : {}),
+    };
   }
-
-  for (const key of ["latitude", "longitude", "emergency_type"]) {
-    const value = action.payload[key];
-    if (value !== undefined && value !== null) {
-      formData.append(key, String(value));
-    }
-  }
-  appendFile(
-    "emergency_image",
-    action.payload.emergency_image_uri,
-    `sos-offline-${action.id}.jpg`,
-    "image/jpeg",
-  );
-  appendFile(
-    "ambient_audio",
-    action.payload.ambient_audio_uri,
-    `sos-offline-${action.id}.m4a`,
-    "audio/m4a",
-  );
-  return formData;
+  return {
+    latitude: Number(action.payload.latitude),
+    longitude: Number(action.payload.longitude),
+    emergency_type: String(action.payload.emergency_type ?? "OTHER"),
+  };
 };
 
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -169,7 +163,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
         try {
           await api.post(
             actionEndpoint(action),
-            buildQueuedRequestBody(action),
+            await buildQueuedRequestBody(action),
+            { headers: { "Content-Type": "application/json" } },
           );
           await removeSyncAction(action.id);
         } catch (error) {

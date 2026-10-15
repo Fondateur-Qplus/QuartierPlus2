@@ -66,12 +66,23 @@ export const listPublicMarketplace = async (_request, response, next) => {
       error: "La position et le rayon de recherche sont invalides.",
     });
   }
+  const requestedType =
+    typeof _request.query.item_type === "string"
+      ? _request.query.item_type.toLowerCase()
+      : null;
+  const requestedCategory =
+    typeof _request.query.category === "string"
+      ? _request.query.category.toUpperCase()
+      : null;
   try {
     const result = await pool.query(
       `SELECT item.id, item.title, item.description, item.category,
+              item.item_type,
               item.price_fcfa AS price, item.price_fcfa = 0 AS is_free,
               item.created_at, user_profile.neighborhood,
-              item.image_urls[1] AS image_url
+              user_profile.full_name AS seller_name,
+              user_profile.phone_number AS seller_phone,
+              item.whatsapp_phone, item.image_urls[1] AS image_url
        FROM marketplace_items AS item
        LEFT JOIN users AS user_profile ON user_profile.id = item.seller_id
        WHERE CASE
@@ -96,9 +107,24 @@ export const listPublicMarketplace = async (_request, response, next) => {
            $3
          )
        END
+         AND ($6::text IS NULL OR item.item_type = $6)
+         AND (
+           $7::text IS NULL OR
+           UPPER(REGEXP_REPLACE(TRANSLATE(
+             item.category,
+             'ÉÈÊËÀÂÄÎÏÔÖÙÛÜÇéèêëàâäîïôöùûüç',
+             'EEEEAAAIIOOUUUCeeeeaaaiioouuuc'
+           ), '[^A-Za-z0-9]+', '_', 'g')) = $7
+         )
        ORDER BY item.created_at DESC
        LIMIT 100`,
-      filter.values,
+      [
+        ...filter.values,
+        requestedType,
+        requestedCategory === "SERVICE" || requestedCategory === "MADE_IN"
+          ? null
+          : requestedCategory,
+      ],
     );
     return response.status(200).json({ items: result.rows });
   } catch (error) {

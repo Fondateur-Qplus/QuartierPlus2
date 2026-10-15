@@ -36,6 +36,11 @@ import type {
   RootStackParamList,
 } from "./src/navigation/types";
 import { OfflineQueryProvider } from "./src/services/queryClient";
+import {
+  checkServerContract,
+  isServerUpdating,
+  subscribeToServerHealth,
+} from "./src/services/serverContract";
 import type { VoiceCommand } from "./src/services/voiceAssistant";
 import CompleteProfileScreen from "./src/screens/auth/CompleteProfileScreen";
 import PhoneAuthScreen from "./src/screens/auth/PhoneAuthScreen";
@@ -322,19 +327,34 @@ function VoiceAssistantLayer({ currentRoute }: { currentRoute: string }) {
 function AppNavigation() {
   const { clearActiveInput } = useVoiceAssistant();
   const [currentRoute, setCurrentRoute] = useState("Welcome");
+  const [serverUpdating, setServerUpdating] = useState(isServerUpdating);
+  useEffect(() => {
+    const unsubscribe = subscribeToServerHealth(() =>
+      setServerUpdating(isServerUpdating()),
+    );
+    void checkServerContract();
+    return unsubscribe;
+  }, []);
   return (
-    <NavigationContainer
-      onStateChange={() => {
-        clearActiveInput();
-        setCurrentRoute(navigationRef.getCurrentRoute()?.name ?? "");
-      }}
-      onReady={() => setCurrentRoute(navigationRef.getCurrentRoute()?.name ?? "")}
-      ref={navigationRef}
-    >
-      <RootNavigator />
-      <VoiceAssistantLayer currentRoute={currentRoute} />
-      <AuthPromptLayer />
-    </NavigationContainer>
+    <View style={{ flex: 1 }}>
+      {serverUpdating && (
+        <Text accessibilityRole="alert" style={styles.serverUpdating}>
+          Le serveur est en cours de mise à jour
+        </Text>
+      )}
+      <NavigationContainer
+        onStateChange={() => {
+          clearActiveInput();
+          setCurrentRoute(navigationRef.getCurrentRoute()?.name ?? "");
+        }}
+        onReady={() => setCurrentRoute(navigationRef.getCurrentRoute()?.name ?? "")}
+        ref={navigationRef}
+      >
+        <RootNavigator />
+        <VoiceAssistantLayer currentRoute={currentRoute} />
+        <AuthPromptLayer />
+      </NavigationContainer>
+    </View>
   );
 }
 
@@ -377,6 +397,15 @@ function AuthPromptLayer() {
 }
 
 const styles = StyleSheet.create({
+  serverUpdating: {
+    backgroundColor: "#fff7ed",
+    color: "#9a3412",
+    fontSize: 14,
+    fontWeight: "600",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    textAlign: "center",
+  },
   voiceButton: {
     alignItems: "center",
     backgroundColor: "#2563eb",

@@ -35,6 +35,7 @@ import * as Location from "expo-location";
 import { File, Paths } from "expo-file-system";
 import { useAuth } from "../context/AuthContext";
 import { API_BASE_URL, apiFetch } from "../services/api";
+import { uploadMarketplaceImage } from "../services/uploadMarketplaceImage";
 import type { MainTabParamList } from "../navigation/types";
 import VoiceTextInput from "../components/VoiceTextInput";
 
@@ -567,32 +568,6 @@ export default function MarketplaceScreen() {
     }
     setIsPublishing(true);
     try {
-      const formData = new FormData();
-      formData.append("title", draftTitle.trim());
-      formData.append("description", draftDescription.trim());
-      formData.append("category", draftCategory);
-      formData.append("item_type", activeTab === "Annonces" ? "listing" : activeTab === "Local / Made in" ? "local" : "service");
-      formData.append("is_free", String(isFreeListing));
-      formData.append("currency", "FCFA");
-      if (!isFreeListing) formData.append("price", String(numericPrice));
-      formData.append(
-        "location",
-        JSON.stringify({
-          latitude: userLocation.latitude,
-          longitude: userLocation.longitude,
-        }),
-      );
-      if (draftImage) {
-        const file = {
-          uri: draftImage.uri,
-          name: `marketplace-${Date.now()}.webp`,
-          type: "image/webp",
-        };
-        const nativeFormData = formData as FormData & {
-          append: (key: string, value: string | typeof file) => void;
-        };
-        nativeFormData.append("image", file);
-      }
       if (isOffline) {
         let persistentImageUri: string | null = null;
         if (draftImage) {
@@ -630,9 +605,35 @@ export default function MarketplaceScreen() {
         );
         return;
       }
+      let mediaPublicId: string | undefined;
+      if (draftImage) {
+        mediaPublicId = await uploadMarketplaceImage(
+          draftImage.uri,
+          draftImage.size,
+          `marketplace-${Date.now()}.webp`,
+        );
+      }
       const response = await apiFetch(`${API_BASE_URL}/v1/marketplace/items`, {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: draftTitle.trim(),
+          description: draftDescription.trim(),
+          category: draftCategory,
+          item_type:
+            activeTab === "Annonces"
+              ? "listing"
+              : activeTab === "Local / Made in"
+                ? "local"
+                : "service",
+          is_free: isFreeListing,
+          price: isFreeListing ? 0 : numericPrice,
+          location: {
+            latitude: userLocation.latitude,
+            longitude: userLocation.longitude,
+          },
+          ...(mediaPublicId ? { media_public_id: mediaPublicId } : {}),
+        }),
       });
       if (!response.ok) {
         throw new Error(`La publication a échoué (HTTP ${response.status}).`);

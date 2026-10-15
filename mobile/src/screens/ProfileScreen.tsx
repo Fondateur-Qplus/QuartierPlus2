@@ -49,6 +49,12 @@ import {
   type EmergencyCountry,
 } from "../services/emergencyServices";
 import { API_BASE_URL, apiFetch } from "../services/api";
+import {
+  checkServerContract,
+  getServerHealth,
+  subscribeToServerHealth,
+  type ServerHealth,
+} from "../services/serverContract";
 import type { RootStackParamList } from "../navigation/types";
 import {
   getTechnicalAvailability,
@@ -158,12 +164,19 @@ export default function ProfileScreen() {
   const [aboutVisible, setAboutVisible] = useState(false);
   const [termsVisible, setTermsVisible] = useState(false);
   const [technicalStatus, setTechnicalStatus] = useState(getTechnicalAvailability);
+  const [serverHealth, setServerHealth] = useState<ServerHealth | null>(
+    getServerHealth,
+  );
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
 
   useEffect(
     () => subscribeToTechnicalAvailability(() => setTechnicalStatus(getTechnicalAvailability())),
     [],
   );
+  useEffect(() => {
+    void checkServerContract();
+    return subscribeToServerHealth(() => setServerHealth(getServerHealth()));
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -729,6 +742,12 @@ export default function ProfileScreen() {
               <Text style={styles.guestMetadata}>Canal : {Updates.channel ?? "—"}</Text>
               <Text style={styles.guestMetadata}>Runtime : {Updates.runtimeVersion ?? "—"}</Text>
               <Text style={styles.guestMetadata}>
+                Commit du serveur : {serverHealth?.commit ?? "indisponible"}
+              </Text>
+              <Text style={styles.guestMetadata}>
+                Hôte API : {API_BASE_URL ? new URL(API_BASE_URL).host : "non configuré"}
+              </Text>
+              <Text style={styles.guestMetadata}>
                 SHA du commit : {process.env.EXPO_PUBLIC_GIT_SHA ?? "non fourni"}
               </Text>
               <Text style={styles.guestTechnicalTitle}>Détails techniques</Text>
@@ -1204,6 +1223,15 @@ export default function ProfileScreen() {
             <LogOut color="#dc2626" size={19} />
             <Text style={styles.logoutText}>Déconnexion</Text>
           </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setAboutVisible(true)}
+            style={styles.menuRow}
+          >
+            <Info color="#2563eb" size={19} />
+            <Text style={styles.menuLabel}>À propos</Text>
+            <ChevronRight color="#94a3b8" size={18} />
+          </Pressable>
         </View>
 
         <View style={styles.footer}>
@@ -1211,6 +1239,34 @@ export default function ProfileScreen() {
           <Text style={styles.footerText}>QuartierPlus · Profil communautaire</Text>
         </View>
       </ScrollView>
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setAboutVisible(false)}
+        transparent
+        visible={aboutVisible}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>À propos de QuartierPlus</Text>
+            <Text style={styles.settingDescription}>
+              Update ID : {Updates.updateId ?? "Version intégrée à l’APK"}
+            </Text>
+            <Text style={styles.settingDescription}>
+              Commit du serveur : {serverHealth?.commit ?? "indisponible"}
+            </Text>
+            <Text style={styles.settingDescription}>
+              Hôte API : {API_BASE_URL ? new URL(API_BASE_URL).host : "non configuré"}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setAboutVisible(false)}
+              style={styles.guestModalClose}
+            >
+              <Text style={styles.guestModalCloseText}>Fermer</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
       <Modal
         animationType="slide"
         onRequestClose={() => setIsEditingProfile(false)}

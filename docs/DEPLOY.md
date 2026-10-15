@@ -8,9 +8,12 @@
   dépôt utilisent Node 20.
 - Base requise : PostgreSQL avec les extensions `uuid-ossp` et **PostGIS**. Le
   schéma utilise des colonnes spatiales ; PostgreSQL seul ne suffit pas.
-- L'API expose déjà `GET /health`. Cette route exécute `SELECT 1` : une réponse
-  `200` confirme que le serveur peut joindre PostgreSQL. Aucun changement de
-  route n'est nécessaire.
+- `GET /health` répond immédiatement avec le statut, le commit Render et la
+  version du contrat API. Il ne dépend pas d'une connexion PostgreSQL, afin que
+  Render puisse vérifier le démarrage avant les opérations de base de données.
+- Le démarrage (`npm start`) n'exécute pas de migration. Sur une base existante,
+  exécutez `migrations/010_mobile_api_contract.sql` avant de déployer le code
+  qui utilise les nouveaux marqueurs, conversations et annonces.
 - L'historique Git, les configurations, les README et les workflows examinés
   ne montrent pas d'hébergeur backend déjà utilisé. Les workflows existants
   concernent les builds mobiles et EAS.
@@ -41,6 +44,7 @@ Puis exécutez, sans supprimer de table ni de données, dans cet ordre :
 8. `server/db/posts-migration.sql`
 9. `migrations/008_posts_text_only_fallback.sql`
 10. `migrations/009_sos_assists.sql`
+11. `migrations/010_mobile_api_contract.sql`
 
 Pour une base Neon neuve, exécutez chaque fichier une seule fois dans l'éditeur
 SQL, dans cet ordre. `auth-migration.sql` utilise des opérations idempotentes
@@ -55,7 +59,9 @@ notamment le Burkina Faso, la Côte d’Ivoire, le Sénégal et le Mali.
 les tables de la place de marché existantes. La migration 008 rend les colonnes
 média facultatives pour autoriser une publication texte si Cloudinary échoue;
 exécutez-la uniquement après `posts-migration.sql`. La migration 009 ajoute les
-confirmations d’aide aux alertes SOS.
+confirmations d’aide aux alertes SOS. La migration 010 ajoute les marqueurs
+cartographiques, les conversations privées et le type d'annonce; elle est
+idempotente et doit être appliquée avant le déploiement du contrat API v2.
 
 ## 2. Créer le service web Render
 
@@ -158,9 +164,10 @@ doit donc conserver le secret existant sous `JWT_SECRET` (sans rotation).
 
 1. Attendez que le déploiement Render soit marqué **Live**.
 2. Ouvrez l'adresse HTTPS du service suivie de `/health` dans le navigateur du
-   téléphone. Le résultat attendu est `{"status":"ok"}`. Si Render signale un
-   échec, vérifiez d'abord `DATABASE_URL`, `PGSSL` et les variables obligatoires
-   dans les journaux du service.
+   téléphone. Le résultat attendu contient `status`, `commit` et
+   `contractVersion`, par exemple
+   `{"status":"ok","commit":"<sha>","contractVersion":2}`. Cette vérification
+   confirme le démarrage HTTP, pas la disponibilité de PostgreSQL.
 3. Copiez l'adresse de base HTTPS du service, sans `/health`, par exemple
    `https://<nom-du-service>.onrender.com`.
 4. Définissez cette adresse comme `EXPO_PUBLIC_API_URL` pour la compilation

@@ -1,0 +1,111 @@
+import { pool } from "../db/pool.js";
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export const listConversations = async (request, response, next) => {
+  try {
+    const result = await pool.query(
+      `SELECT conversation.id, other_user.id AS participant_id,
+              other_user.full_name AS participant_name,
+              latest.body AS last_message,
+              COALESCE(latest.created_at, conversation.created_at) AS updated_at,
+              (SELECT COUNT(*)::int
+               FROM private_messages AS unread
+               WHERE unread.conversation_id = conversation.id
+                 AND unread.sender_id <> $1
+                 AND unread.created_at > own.last_read_at) AS unread_count
+       FROM conversation_participants AS own
+       JOIN conversations AS conversation
+         ON conversation.id = own.conversation_id
+       JOIN conversation_participants AS other
+         ON other.conversation_id = conversation.id AND other.user_id <> $1
+       JOIN users AS other_user ON other_user.id = other.user_id
+       LEFT JOIN LATERAL (
+         SELECT body, created_at
+         FROM private_messages
+         WHERE conversation_id = conversation.id
+         ORDER BY created_at DESC
+         LIMIT 1
+       ) AS latest ON TRUE
+       WHERE own.user_id = $1
+       ORDER BY COALESCE(latest.created_at, conversation.created_at) DESC`,
+      [request.auth.userId],
+    );
+    return response.status(200).json({ conversations: result.rows });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const listPrivateMessages = async (request, response, next) => {
+  if (!UUID_PATTERN.test(request.params.conversationId)) {
+    return response.status(400).json({ error: "Identifiant de conversation invalide." });
+  }
+  try {
+    const result = await pool.query(
+      `SELECT message.id, message.conversation_id, message.sender_id,
+              profile.full_name AS sender_name, message.body AS content,
+              message.created_at, message.sender_id = $2 AS is_mine
+       FROM private_messages AS message
+       JOIN conversation_participants AS participant
+         ON participant.conversation_id = message.conversation_id
+        AND participant.user_id = $2
+       LEFT JOIN users AS profile ON profile.id = message.sender_id
+       WHERE message.conversation_id = $1
+       ORDER BY message.created_at DESC
+       LIMIT 100`,
+      [request.params.conversationId, request.auth.userId],
+    );
+    if (!result.rows.length) {
+      const participant = await pool.query(
+        `SELECT 1 FROM conversation_participants
+         WHERE conversation_id = $1 AND user_id = $2`,
+        [request.params.conversationId, request.auth.userId],
+      );
+      if (!participant.rowCount) {
+        return response.status(404).json({ error: "Conversation introuvable." });
+      }
+    }
+    await pool.query(
+      `UPDATE conversation_participants
+       SET last_read_at = CURRENT_TIMESTAMP
+       WHERE conversation_id = $1 AND user_id = $2`,
+      [request.params.conversationId, request.auth.userId],
+    );
+    return response.status(200).json({ messages: result.rows.reverse() });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const createPrivateMessage = async (request, response, next) => {
+  if (!UUID_PATTERN.test(request.params.conversationId)) {
+    return response.status(400).json({ error: "Identifiant de conversation invalide." });
+  }
+  const content =
+    typeof request.body?.content === "string"
+      ? request.body.content.trim()
+      : "";
+  if (!content || content.length > 5000) {
+    return response.status(400).json({ error: "Contenu du message invalide." });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO private_messages (conversation_id, sender_id, body)
+       SELECT participant.conversation_id, participant.user_id, $3
+       FROM conversation_participants AS participant
+       WHERE participant.conversation_id = $1 AND participant.user_id = $2
+       RETURNING id, conversation_id, sender_id, body AS content, created_at`,
+      [request.params.conversationId, request.auth.userId, content],
+    );
+    if (!result.rowCount) {
+      return response.status(404).json({ error: "Conversation introuvable." });
+    }
+    return response.status(201).json({
+      message: { ...result.rows[0], is_mine: true },
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
