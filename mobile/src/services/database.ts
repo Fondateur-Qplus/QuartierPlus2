@@ -109,6 +109,7 @@ const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
   const result = operationQueue.then(async () => {
     try {
       const value = await operation();
+      lockErrors = 0;
       return value;
     } catch (error) {
       if (isLockError(error)) {

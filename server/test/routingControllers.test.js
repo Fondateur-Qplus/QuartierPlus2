@@ -9,6 +9,7 @@ process.env.DOTENV_CONFIG_PATH = "/dev/null";
 const { listChannelMessages, createChannelMessage } = await import(
   "../controllers/channelController.js"
 );
+const { listConversations } = await import("../controllers/conversationController.js");
 const { assistSosAlert, reportSosAlert } = await import(
   "../controllers/sosController.js"
 );
@@ -29,7 +30,7 @@ const createResponse = () => ({
 
 test("channel history resolves the public alias and returns it to the mobile client", async (context) => {
   context.mock.method(pool, "query", async (statement) =>
-    statement.includes("SELECT id, name FROM channels")
+    statement.includes("FROM channels AS channel")
       ? { rows: [{ id: "channel-uuid", name: "URGENCES" }] }
       : {
           rows: [
@@ -57,7 +58,7 @@ test("channel history resolves the public alias and returns it to the mobile cli
 
 test("channel message creation accepts text and returns the mobile channel alias", async (context) => {
   context.mock.method(pool, "query", async (statement) =>
-    statement.includes("SELECT id, name FROM channels")
+    statement.includes("FROM channels AS channel")
       ? { rows: [{ id: "channel-uuid", name: "URGENCES" }] }
       : {
           rowCount: 1,
@@ -88,6 +89,42 @@ test("channel message creation accepts text and returns the mobile channel alias
   assert.equal(response.statusCode, 201);
   assert.equal(response.payload.message.channel_id, "emergency");
   assert.equal(response.payload.message.content, "Besoin d'aide");
+});
+
+test("empty public channel history is a successful empty list", async (context) => {
+  context.mock.method(pool, "query", async (statement) =>
+    statement.includes("FROM channels AS channel")
+      ? { rows: [{ id: "channel-uuid", name: "URGENCES" }] }
+      : { rows: [] },
+  );
+  const response = createResponse();
+
+  await listChannelMessages(
+    { params: { channelId: "emergency" }, auth: { userId: "user-uuid" } },
+    response,
+    (error) => {
+      throw error;
+    },
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.payload, { messages: [] });
+});
+
+test("an account without private conversations receives a successful empty list", async (context) => {
+  context.mock.method(pool, "query", async () => ({ rows: [] }));
+  const response = createResponse();
+
+  await listConversations(
+    { auth: { userId: "user-uuid" } },
+    response,
+    (error) => {
+      throw error;
+    },
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.payload, { conversations: [] });
 });
 
 test("SOS assistance is persisted for an active alert", async (context) => {

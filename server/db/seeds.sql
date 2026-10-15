@@ -868,14 +868,12 @@ VALUES
     ('ZW', '+263')
 ON CONFLICT (country_code, phone_prefix) DO NOTHING;
 
-INSERT INTO channels (name, kind)
-SELECT 'URGENCES', 'EMERGENCY'
-WHERE NOT EXISTS (
-    SELECT 1 FROM channels WHERE name = 'URGENCES'
-);
-
-INSERT INTO channels (name, kind)
-SELECT 'ANNONCES', 'ANNOUNCEMENTS'
-WHERE NOT EXISTS (
-    SELECT 1 FROM channels WHERE name = 'ANNONCES'
-);
+INSERT INTO channels (name, kind, country_code)
+SELECT channel.name, channel.kind, country.code
+FROM country_config AS country
+CROSS JOIN (
+    VALUES ('URGENCES', 'EMERGENCY'), ('ANNONCES', 'ANNOUNCEMENTS')
+) AS channel(name, kind)
+ON CONFLICT (country_code, kind)
+    WHERE country_code IS NOT NULL
+DO UPDATE SET name = EXCLUDED.name;

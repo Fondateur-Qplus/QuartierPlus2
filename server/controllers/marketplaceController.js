@@ -46,6 +46,10 @@ export const createMarketplaceItem = async (request, response, next) => {
     typeof request.body?.description === "string"
       ? request.body.description.trim()
       : "";
+  const countryCode =
+    typeof request.body?.country_code === "string"
+      ? request.body.country_code.trim().toUpperCase()
+      : null;
   const category =
     typeof request.body?.category === "string"
       ? request.body.category.trim().slice(0, 30)
@@ -60,28 +64,61 @@ export const createMarketplaceItem = async (request, response, next) => {
   const latitude = Number(coordinates?.latitude);
   const longitude = Number(coordinates?.longitude);
   const mediaPublicId = request.body?.media_public_id;
+  const errors = [];
+  const addError = (field, message) => errors.push({ field, message });
+  if (!title) addError("title", "Le titre est obligatoire.");
+  else if (title.length > 150) {
+    addError("title", "Le titre ne peut pas dépasser 150 caractères.");
+  }
+  if (description.length > 5000) {
+    addError("description", "La description ne peut pas dépasser 5 000 caractères.");
+  }
+  if (!category) addError("category", "La catégorie est obligatoire.");
+  if (!ITEM_TYPES.has(itemType)) {
+    addError("item_type", "Choisissez une portée d'annonce valide.");
+  }
+  if (!isFree && !Number.isFinite(price)) {
+    addError("price", "Saisissez un prix valide ou choisissez Gratuit / Don.");
+  } else if (!isFree && price <= 0) {
+    addError("price", "Le prix doit être supérieur à zéro, sauf pour un don.");
+  } else if (isFree && request.body?.price !== undefined && Number(request.body.price) !== 0) {
+    addError("price", "Le prix d'une annonce gratuite doit être égal à zéro.");
+  }
   if (
-    !title ||
-    title.length > 150 ||
-    description.length > 5000 ||
-    !category ||
-    !ITEM_TYPES.has(itemType) ||
-    !Number.isFinite(price) ||
-    price < 0 ||
-    (!isFree && price === 0) ||
-    !Number.isFinite(latitude) ||
-    Math.abs(latitude) > 90 ||
-    !Number.isFinite(longitude) ||
-    Math.abs(longitude) > 180
+    request.body?.currency !== undefined &&
+    request.body.currency !== "FCFA"
   ) {
-    return response.status(400).json({ error: "Les informations de l'annonce sont invalides." });
+    addError("currency", "La devise acceptée est le FCFA.");
+  }
+  if (
+    countryCode !== null &&
+    !/^[A-Z]{2,3}$/.test(countryCode)
+  ) {
+    addError("country_code", "Choisissez un code pays valide.");
+  }
+  if (!Number.isFinite(latitude) || Math.abs(latitude) > 90) {
+    addError("location.latitude", "La latitude doit être comprise entre -90 et 90.");
+  }
+  if (!Number.isFinite(longitude) || Math.abs(longitude) > 180) {
+    addError("location.longitude", "La longitude doit être comprise entre -180 et 180.");
+  }
+  if (errors.length) {
+    return response.status(400).json({
+      code: "VALIDATION_ERROR",
+      message: "Vérifiez les champs de votre annonce.",
+      errors,
+    });
   }
   try {
     let imageUrl = null;
     if (mediaPublicId !== undefined) {
       const verified = await validateImage(request.auth.userId, mediaPublicId);
       if (verified.error) {
-        return response.status(400).json({ error: verified.error });
+        return response.status(400).json({
+          code: "VALIDATION_ERROR",
+          message: "La photo ne peut pas être utilisée.",
+          errors: [{ field: "media_public_id", message: verified.error }],
+        });
       }
       imageUrl = verified.image.secure_url;
     }
@@ -95,6 +132,7 @@ export const createMarketplaceItem = async (request, response, next) => {
               profile.phone_number, profile.phone_number
        FROM users AS profile
        WHERE profile.id = $1
+         AND ($10::text IS NULL OR profile.country_code = $10)
        RETURNING id, title, description, price_fcfa AS price,
                  price_fcfa = 0 AS is_free, category, item_type,
                  image_urls[1] AS image_url, created_at,
@@ -112,9 +150,29 @@ export const createMarketplaceItem = async (request, response, next) => {
         imageUrl,
         latitude,
         longitude,
+        countryCode,
       ],
     );
     if (!result.rowCount) {
+      if (countryCode) {
+        const seller = await pool.query(
+          "SELECT country_code FROM users WHERE id = $1",
+          [request.auth.userId],
+        );
+        if (
+          seller.rowCount &&
+          seller.rows[0].country_code !== countryCode
+        ) {
+          return response.status(400).json({
+            code: "VALIDATION_ERROR",
+            message: "Le pays de l'annonce doit correspondre au pays du compte.",
+            errors: [{
+              field: "country_code",
+              message: "Le pays sélectionné ne correspond pas à votre compte.",
+            }],
+          });
+        }
+      }
       return response.status(404).json({ error: "Utilisateur introuvable." });
     }
     return response.status(201).json({

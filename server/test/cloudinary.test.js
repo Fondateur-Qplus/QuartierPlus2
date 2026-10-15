@@ -34,6 +34,22 @@ test("Cloudinary upload signatures sort params and never return the secret", () 
   assert.equal(JSON.stringify(result).includes("test-api-secret"), false);
 });
 
+test("Cloudinary official upload example signs timestamp and public_id only", () => {
+  const parameters = {
+    timestamp: 1315060510,
+    public_id: "sample_image",
+    file: "ignored-file-content",
+    api_key: "ignored-api-key",
+    resource_type: "video",
+  };
+  const result = createCloudinaryUploadSignature(parameters);
+  const expected = createHash("sha1")
+    .update("public_id=sample_image&timestamp=1315060510test-api-secret")
+    .digest("hex");
+
+  assert.equal(result.signature, expected);
+});
+
 test("GPS EXIF metadata is detected for post-upload deletion", () => {
   assert.equal(
     hasGpsMetadata({ Make: "Camera", GPSLatitude: "12/1, 34/1" }),

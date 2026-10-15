@@ -1,5 +1,6 @@
 import axios from "axios";
 import { apiFetch, API_BASE_URL } from "./api";
+import { MediaUploadError } from "./mediaUploadError";
 
 type UploadSignature = {
   apiKey: string;
@@ -20,11 +21,21 @@ export const uploadMarketplaceImage = async (
   filename: string,
 ) => {
   if (!API_BASE_URL) throw new Error("L'adresse du serveur n'est pas configurée.");
-  const response = await apiFetch(`${API_BASE_URL}/v1/media/sign`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ media_type: "image" }),
-  });
+  let response;
+  try {
+    response = await apiFetch(`${API_BASE_URL}/v1/media/sign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ media_type: "image" }),
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Impossible de joindre le serveur.";
+    throw new MediaUploadError(
+      "Le média n'a pas pu être téléversé.",
+      `Étape : signature\nURL de signature : ${API_BASE_URL}/v1/media/sign\nErreur : ${message}`,
+    );
+  }
   const payload: unknown = await response.json();
   if (
     !response.ok ||
@@ -37,10 +48,13 @@ export const uploadMarketplaceImage = async (
     typeof payload.timestamp !== "number" ||
     typeof payload.max_bytes !== "number"
   ) {
-    throw new Error(
+    const message =
       isRecord(payload) && typeof payload.error === "string"
         ? payload.error
-        : "Impossible de préparer la photo de l'annonce.",
+        : "Impossible de préparer la photo de l'annonce.";
+    throw new MediaUploadError(
+      "Le média n'a pas pu être téléversé.",
+      `Étape : signature\nURL de signature : ${API_BASE_URL}/v1/media/sign\nStatut HTTP : ${response.status}\nMessage : ${message}`,
     );
   }
   const signature = payload as UploadSignature;
@@ -58,13 +72,53 @@ export const uploadMarketplaceImage = async (
   formData.append("public_id", signature.public_id);
   formData.append("signature", signature.signature);
 
-  const upload = await axios.post<{ public_id: string }>(
-    `https://api.cloudinary.com/v1_1/${signature.cloudName}/image/upload`,
-    formData,
-    { timeout: 20_000 },
-  );
+  const uploadUrl = `https://api.cloudinary.com/v1_1/${signature.cloudName}/image/upload`;
+  let upload;
+  try {
+    upload = await axios.post<{ public_id: string }>(
+      uploadUrl,
+      formData,
+      { timeout: 20_000 },
+    );
+  } catch (error) {
+    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+    const responseData: unknown = axios.isAxiosError(error)
+      ? error.response?.data
+      : null;
+    const cloudinaryMessage =
+      isRecord(responseData) &&
+      isRecord(responseData.error) &&
+      typeof responseData.error.message === "string"
+        ? responseData.error.message
+        : error instanceof Error
+          ? error.message
+          : "Réponse Cloudinary indisponible.";
+    throw new MediaUploadError(
+      "Le média n'a pas pu être téléversé.",
+      [
+        "Étape : téléversement Cloudinary",
+        `URL : ${uploadUrl}`,
+        "Type de ressource : image",
+        `Timestamp signé : ${signature.timestamp}`,
+        "Paramètres signés : folder, public_id, timestamp",
+        `Statut HTTP : ${status ?? "indisponible"}`,
+        `Message Cloudinary : ${cloudinaryMessage}`,
+      ].join("\n"),
+    );
+  }
   if (upload.data.public_id !== signature.public_id) {
-    throw new Error("La réponse du téléversement de la photo est invalide.");
+    throw new MediaUploadError(
+      "Le média n'a pas pu être téléversé.",
+      [
+        "Étape : vérification de la réponse Cloudinary",
+        `URL : ${uploadUrl}`,
+        "Type de ressource : image",
+        `Timestamp signé : ${signature.timestamp}`,
+        "Paramètres signés : folder, public_id, timestamp",
+        "Statut HTTP : 200",
+        "Message Cloudinary : identifiant public inattendu.",
+      ].join("\n"),
+    );
   }
   return upload.data.public_id;
 };

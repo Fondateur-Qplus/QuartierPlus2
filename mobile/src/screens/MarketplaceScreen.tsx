@@ -36,6 +36,7 @@ import { File, Paths } from "expo-file-system";
 import { useAuth } from "../context/AuthContext";
 import { API_BASE_URL, apiFetch } from "../services/api";
 import { uploadMarketplaceImage } from "../services/uploadMarketplaceImage";
+import { MediaUploadError } from "../services/mediaUploadError";
 import type { MainTabParamList } from "../navigation/types";
 import VoiceTextInput from "../components/VoiceTextInput";
 
@@ -93,6 +94,18 @@ const TRADE_CATEGORIES: TradeCategory[] = [
 ];
 const COUNTRIES = ["Tous les pays", "Sénégal", "Côte d'Ivoire", "Bénin"];
 const MAX_IMAGE_BYTES = 300 * 1024;
+const VALIDATION_FIELD_LABELS: Record<string, string> = {
+  title: "Titre",
+  description: "Description",
+  category: "Catégorie",
+  item_type: "Portée",
+  price: "Prix",
+  currency: "Devise",
+  country_code: "Pays",
+  "location.latitude": "Position (latitude)",
+  "location.longitude": "Position (longitude)",
+  media_public_id: "Photo",
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -188,7 +201,13 @@ const normalizeSearchText = (text: string) =>
 
 export default function MarketplaceScreen() {
   const route = useRoute<RouteProp<MainTabParamList, "Marche">>();
-  const { authStatus, isOffline, queueOfflineAction, requestAuthentication } = useAuth();
+  const {
+    authStatus,
+    isOffline,
+    queueOfflineAction,
+    requestAuthentication,
+    user,
+  } = useAuth();
 
   const requireConnectedUser = () => {
     if (authStatus !== "connected") {
@@ -222,6 +241,9 @@ export default function MarketplaceScreen() {
     uri: string;
     size: number;
   } | null>(null);
+  const [pendingMediaPublicId, setPendingMediaPublicId] = useState<string | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [mediaTechnicalDetails, setMediaTechnicalDetails] = useState<string | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
   const [selectedReportItem, setSelectedReportItem] =
     useState<MarketplaceItem | null>(null);
@@ -489,6 +511,9 @@ export default function MarketplaceScreen() {
     );
     setIsFreeListing(false);
     setDraftImage(null);
+    setPendingMediaPublicId(null);
+    setPublishError(null);
+    setMediaTechnicalDetails(null);
     setIsCreateModalVisible(true);
   };
 
@@ -528,6 +553,9 @@ export default function MarketplaceScreen() {
         throw new Error("La photo ne peut pas être compressée sous 300 Ko.");
       }
       setDraftImage({ uri, size });
+      setPendingMediaPublicId(null);
+      setPublishError(null);
+      setMediaTechnicalDetails(null);
     } catch (error) {
       Alert.alert(
         "Image indisponible",
@@ -567,6 +595,8 @@ export default function MarketplaceScreen() {
       return;
     }
     setIsPublishing(true);
+    setPublishError(null);
+    setMediaTechnicalDetails(null);
     try {
       if (isOffline) {
         let persistentImageUri: string | null = null;
@@ -591,6 +621,7 @@ export default function MarketplaceScreen() {
                 : "service",
           is_free: String(isFreeListing),
           currency: "FCFA",
+          ...(user?.country_code ? { country_code: user.country_code } : {}),
           ...(isFreeListing ? {} : { price: String(numericPrice) }),
           location: JSON.stringify({
             latitude: userLocation.latitude,
@@ -605,13 +636,14 @@ export default function MarketplaceScreen() {
         );
         return;
       }
-      let mediaPublicId: string | undefined;
+      let mediaPublicId = pendingMediaPublicId ?? undefined;
       if (draftImage) {
-        mediaPublicId = await uploadMarketplaceImage(
-          draftImage.uri,
-          draftImage.size,
-          `marketplace-${Date.now()}.webp`,
-        );
+        mediaPublicId ??= await uploadMarketplaceImage(
+            draftImage.uri,
+            draftImage.size,
+            `marketplace-${Date.now()}.webp`,
+          );
+        setPendingMediaPublicId(mediaPublicId);
       }
       const response = await apiFetch(`${API_BASE_URL}/v1/marketplace/items`, {
         method: "POST",
@@ -628,6 +660,8 @@ export default function MarketplaceScreen() {
                 : "service",
           is_free: isFreeListing,
           price: isFreeListing ? 0 : numericPrice,
+          currency: "FCFA",
+          ...(user?.country_code ? { country_code: user.country_code } : {}),
           location: {
             latitude: userLocation.latitude,
             longitude: userLocation.longitude,
@@ -636,7 +670,28 @@ export default function MarketplaceScreen() {
         }),
       });
       if (!response.ok) {
-        throw new Error(`La publication a échoué (HTTP ${response.status}).`);
+        const payload: unknown = await response.json();
+        const fieldErrors =
+          isRecord(payload) && Array.isArray(payload.errors)
+            ? payload.errors
+                .filter(
+                  (item): item is { field: string; message: string } =>
+                    isRecord(item) &&
+                    typeof item.field === "string" &&
+                    typeof item.message === "string",
+                )
+                .map(
+                  ({ field, message }) =>
+                    `${VALIDATION_FIELD_LABELS[field] ?? field} : ${message}`,
+                )
+            : [];
+        throw new Error(
+          fieldErrors.length
+            ? fieldErrors.join("\n")
+            : isRecord(payload) && typeof payload.message === "string"
+              ? payload.message
+              : `La publication a échoué (HTTP ${response.status}).`,
+        );
       }
       const payload: unknown = await response.json();
       const rawItem = isRecord(payload) && "item" in payload ? payload.item : payload;
@@ -646,12 +701,40 @@ export default function MarketplaceScreen() {
       }
       setItems((current) => [newItem, ...current.filter((item) => item.id !== newItem.id)]);
       setIsCreateModalVisible(false);
+      setPendingMediaPublicId(null);
       Alert.alert("Annonce publiée", "Votre annonce a été publiée sur le marché.");
     } catch (error) {
-      Alert.alert(
-        "Publication impossible",
-        error instanceof Error ? error.message : "Une erreur est survenue.",
+      if (error instanceof MediaUploadError) {
+        setPublishError(error.message);
+        setMediaTechnicalDetails(error.technicalDetails);
+      } else {
+        setPublishError(error instanceof Error ? error.message : "Une erreur est survenue.");
+      }
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  const retryListingMedia = async () => {
+    if (!draftImage || isPublishing) return;
+    setIsPublishing(true);
+    setPublishError(null);
+    setMediaTechnicalDetails(null);
+    try {
+      const publicId = await uploadMarketplaceImage(
+        draftImage.uri,
+        draftImage.size,
+        `marketplace-${Date.now()}.webp`,
       );
+      setPendingMediaPublicId(publicId);
+      setPublishError("Photo téléversée. Publiez l’annonce pour l’enregistrer.");
+    } catch (error) {
+      setPublishError(
+        error instanceof Error ? error.message : "Le média n'a pas pu être téléversé.",
+      );
+      if (error instanceof MediaUploadError) {
+        setMediaTechnicalDetails(error.technicalDetails);
+      }
     } finally {
       setIsPublishing(false);
     }
@@ -1167,6 +1250,26 @@ export default function MarketplaceScreen() {
                   </Text>
                 </View>
               </Pressable>
+              {publishError ? (
+                <View style={styles.publishError}>
+                  <Text style={styles.publishErrorText}>{publishError}</Text>
+                  {mediaTechnicalDetails ? (
+                    <>
+                      <Text selectable style={styles.mediaTechnicalDetails}>
+                        {mediaTechnicalDetails}
+                      </Text>
+                      <Pressable
+                        accessibilityRole="button"
+                        disabled={isPublishing}
+                        onPress={() => void retryListingMedia()}
+                        style={styles.retryMediaButton}
+                      >
+                        <Text style={styles.retryMediaText}>Réessayer le média</Text>
+                      </Pressable>
+                    </>
+                  ) : null}
+                </View>
+              ) : null}
               <Pressable
                 accessibilityRole="button"
                 disabled={isPublishing}
@@ -1868,4 +1971,14 @@ const styles = StyleSheet.create({
     marginTop: 12,
     minHeight: 44,
   },
+  publishError: {
+    backgroundColor: "#fef2f2",
+    borderRadius: 10,
+    gap: 8,
+    padding: 12,
+  },
+  publishErrorText: { color: "#991b1b", fontSize: 13, lineHeight: 19 },
+  mediaTechnicalDetails: { color: "#475569", fontSize: 11, lineHeight: 16 },
+  retryMediaButton: { alignSelf: "flex-start", paddingVertical: 6 },
+  retryMediaText: { color: "#1d4ed8", fontSize: 13, fontWeight: "700" },
 });

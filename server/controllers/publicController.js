@@ -141,8 +141,13 @@ export const listNearbyAlerts = async (request, response, next) => {
   }
   try {
     const result = await pool.query(
-      `SELECT alert.id, alert.emergency_type, alert.created_at,
-              ST_Y(alert.location) AS latitude, ST_X(alert.location) AS longitude
+      `SELECT alert.id, alert.emergency_type, alert.status, alert.created_at,
+              ROUND(ST_Distance(
+                alert.location::geography,
+                ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography
+              ) / 100) * 100 AS distance_m,
+              ST_Y(ST_SnapToGrid(alert.location, 0.002)) AS latitude,
+              ST_X(ST_SnapToGrid(alert.location, 0.002)) AS longitude
        FROM sos_alerts AS alert
        LEFT JOIN users AS alert_author ON alert_author.id = alert.user_id
        WHERE alert.status = 'ACTIVE'

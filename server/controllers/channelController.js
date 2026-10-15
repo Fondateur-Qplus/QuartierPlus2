@@ -9,30 +9,41 @@ const CHANNEL_ALIASES = new Map([
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const findChannel = async (channelId) => {
+const findChannel = async (channelId, userId) => {
   const alias = CHANNEL_ALIASES.get(channelId.toUpperCase());
   if (alias) {
     const result = await pool.query(
-      `SELECT id, name FROM channels
-       WHERE UPPER(kind) = $1 OR UPPER(name) = $2
-       ORDER BY CASE WHEN UPPER(kind) = $1 THEN 0 ELSE 1 END
+      `SELECT channel.id, channel.name FROM channels AS channel
+      WHERE (UPPER(channel.kind) = $1 OR UPPER(channel.name) = $2)
+        AND (channel.country_code IS NULL OR channel.country_code = (
+          SELECT country_code FROM users WHERE id = $3
+        ))
+       ORDER BY
+         CASE WHEN channel.country_code = (
+           SELECT country_code FROM users WHERE id = $3
+         ) THEN 0 ELSE 1 END,
+         CASE WHEN UPPER(channel.kind) = $1 THEN 0 ELSE 1 END
        LIMIT 1`,
-      [alias, channelId.toUpperCase()],
+      [alias, channelId.toUpperCase(), userId],
     );
     return result.rows[0] ?? null;
   }
   if (!UUID_PATTERN.test(channelId)) return null;
   const result = await pool.query(
-    `SELECT id, name FROM channels WHERE id = $1
-     AND UPPER(kind) IN ('EMERGENCY', 'ANNOUNCEMENTS')`,
-    [channelId],
+    `SELECT channel.id, channel.name FROM channels AS channel
+     WHERE channel.id = $1
+       AND UPPER(channel.kind) IN ('EMERGENCY', 'ANNOUNCEMENTS')
+       AND (channel.country_code IS NULL OR channel.country_code = (
+         SELECT country_code FROM users WHERE id = $2
+       ))`,
+    [channelId, userId],
   );
   return result.rows[0] ?? null;
 };
 
 export const listChannelMessages = async (request, response, next) => {
   try {
-    const channel = await findChannel(request.params.channelId);
+    const channel = await findChannel(request.params.channelId, request.auth.userId);
     if (!channel) {
       return response.status(404).json({ error: "Canal public introuvable." });
     }
@@ -69,7 +80,7 @@ export const createChannelMessage = async (request, response, next) => {
     return response.status(400).json({ error: "Contenu du message invalide." });
   }
   try {
-    const channel = await findChannel(request.params.channelId);
+    const channel = await findChannel(request.params.channelId, request.auth.userId);
     if (!channel) {
       return response.status(404).json({ error: "Canal public introuvable." });
     }

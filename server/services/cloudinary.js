@@ -16,7 +16,15 @@ const requireCloudinaryConfiguration = () => {
 export const createCloudinaryUploadSignature = (parameters) => {
   requireCloudinaryConfiguration();
   const signedParameters = Object.entries(parameters)
-    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .filter(
+      ([key, value]) =>
+        !["api_key", "file", "resource_type", "signature"].includes(
+          key.toLowerCase(),
+        ) &&
+        value !== undefined &&
+        value !== null &&
+        value !== "",
+    )
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => `${key}=${value}`)
     .join("&");

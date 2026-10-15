@@ -71,11 +71,9 @@ test("country seeds upsert by country code and channels are replay-safe", () => 
   assert.match(seeds, /ON CONFLICT \(code\) DO UPDATE SET/);
   assert.match(seeds, /ON CONFLICT \(country_code, phone_prefix\) DO NOTHING/);
   for (const channel of ["URGENCES", "ANNONCES"]) {
-    assert.match(
-      seeds,
-      new RegExp(`SELECT '${channel}'.*?WHERE NOT EXISTS`, "s"),
-    );
+    assert.match(seeds, new RegExp(`\\('${channel}',`));
   }
+  assert.match(seeds, /ON CONFLICT \(country_code, kind\)[\s\S]*DO UPDATE SET name/);
 });
 
 test("unknown emergency numbers are empty rather than invented", () => {

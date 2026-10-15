@@ -43,7 +43,9 @@ test("public marketplace returns an empty successful feed when there are no item
 
 test("nearby SOS alerts accept valid radius filters and return an empty list", async (context) => {
   let queryValues;
-  context.mock.method(pool, "query", async (_statement, values) => {
+  let queryStatement;
+  context.mock.method(pool, "query", async (statement, values) => {
+    queryStatement = statement;
     queryValues = values;
     return { rowCount: 0, rows: [] };
   });
@@ -66,6 +68,8 @@ test("nearby SOS alerts accept valid radius filters and return an empty list", a
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.payload, { alerts: [] });
   assert.deepEqual(queryValues, [12.37, -1.52, 30_000, null, null]);
+  assert.match(queryStatement, /ST_SnapToGrid\(alert\.location, 0\.002\)/);
+  assert.doesNotMatch(queryStatement, /ST_Y\(alert\.location\)/);
 });
 
 test("public feed rejects invalid coordinates instead of ignoring the filter", async (context) => {

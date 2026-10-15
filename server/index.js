@@ -22,6 +22,7 @@ import userRoutes from "./routes/userRoutes.js";
 import { createServer } from "node:http";
 import { attachSocketServer } from "./sockets/index.js";
 import { handleHealth } from "./health.js";
+import { ensureDefaultChannels } from "./services/defaultChannels.js";
 
 const app = express();
 
@@ -66,9 +67,19 @@ app.use((error, _request, response, _next) => {
 const server = createServer(app);
 const io = attachSocketServer(server);
 
-server.listen(env.port, () => {
-  console.log(`QuartierPlus API listening on port ${env.port}`);
-});
+void ensureDefaultChannels()
+  .then(() => {
+    server.listen(env.port, () => {
+      console.log(`QuartierPlus API listening on port ${env.port}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Unable to initialize default public channels:", error);
+    process.exitCode = 1;
+    server.close();
+    io.close();
+    void pool.end();
+  });
 
 const shutdown = (signal) => {
   console.log(`${signal} received; closing API server.`);
