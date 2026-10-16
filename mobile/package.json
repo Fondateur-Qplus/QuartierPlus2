@@ -13,6 +13,7 @@
     "@livekit/react-native-expo-plugin": "^1.0.3",
     "@livekit/react-native-webrtc": "^144.2.0",
     "@quartierplus/grin-pip": "file:modules/grin-pip",
+    "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/netinfo": "12.0.1",
     "@react-native-firebase/app": "26.4.0",
     "@react-native-firebase/crashlytics": "26.4.0",
@@ -71,10 +72,14 @@
         {
           "babelrc": false,
           "configFile": false,
-          "presets": ["babel-preset-expo"]
+          "presets": [
+            "babel-preset-expo"
+          ]
         }
       ]
     },
-    "testMatch": ["<rootDir>/src/**/*.test.js"]
+    "testMatch": [
+      "<rootDir>/src/**/*.test.js"
+    ]
   }
 }

@@ -1,4 +1,5 @@
 import { pool } from "../db/pool.js";
+import { env } from "../config/env.js";
 import { IS_PROMO_FREE_ACCESS } from "../config/monetization.js";
 
 const FEATURE_SECTIONS = {
@@ -33,6 +34,7 @@ export const getMySubscription = async (request, response, next) => {
             }
           : null),
       promo_free_access: IS_PROMO_FREE_ACCESS,
+      billing_enabled: env.billingEnabled,
     });
   } catch (error) {
     return next(error);

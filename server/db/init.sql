@@ -125,8 +125,12 @@ CREATE TABLE IF NOT EXISTS marketplace_items (
     contact_phone VARCHAR(20),
     image_urls TEXT[],
     location GEOMETRY(Point, 4326) NOT NULL,
+    country_of_origin VARCHAR(3),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE marketplace_items
+    ADD COLUMN IF NOT EXISTS country_of_origin VARCHAR(3);
 
 ALTER TABLE marketplace_items
     ADD COLUMN IF NOT EXISTS item_type VARCHAR(20) NOT NULL DEFAULT 'listing'
@@ -235,8 +239,12 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     status VARCHAR(10) NOT NULL DEFAULT 'ACTIVE'
         CHECK (status IN ('ACTIVE', 'EXPIRED')),
     starts_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMPTZ NOT NULL
+    expires_at TIMESTAMPTZ NOT NULL,
+    publication JSONB NOT NULL DEFAULT '{}'::jsonb
 );
+
+ALTER TABLE subscriptions
+    ADD COLUMN IF NOT EXISTS publication JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS sponsored_pins (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -244,10 +252,17 @@ CREATE TABLE IF NOT EXISTS sponsored_pins (
     title VARCHAR(150) NOT NULL,
     location GEOGRAPHY(Point, 4326) NOT NULL,
     icon_url TEXT,
+    caption VARCHAR(300) NOT NULL DEFAULT '',
+    marketplace_item_id UUID REFERENCES marketplace_items(id) ON DELETE SET NULL,
     starts_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMPTZ NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT FALSE
 );
+
+ALTER TABLE sponsored_pins
+    ADD COLUMN IF NOT EXISTS caption VARCHAR(300) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS marketplace_item_id UUID
+        REFERENCES marketplace_items(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS residences (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

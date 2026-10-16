@@ -8,6 +8,7 @@ process.env.JWT_SECRET ??=
 process.env.FEDAPAY_SECRET_KEY = "sk_test_fedapay";
 process.env.FEDAPAY_ENVIRONMENT = "sandbox";
 process.env.FEDAPAY_WEBHOOK_SECRET = "webhook-test-secret";
+process.env.BILLING_ENABLED = "true";
 
 const { pool } = await import("../db/pool.js");
 const { createFedaPayTransaction } = await import("../services/fedapay.js");
@@ -133,7 +134,13 @@ test("FedaPay checkout accepts every Pro plan at its server-defined price", asyn
         },
       };
       await createTransaction(
-        { body: { payment_type: paymentType }, auth: { userId: "user-1" } },
+        {
+          body: {
+            payment_type: paymentType,
+            publication: { title: "Structure", description: "Présentation" },
+          },
+          auth: { userId: "user-1" },
+        },
         response,
         (error) => { throw error; },
       );

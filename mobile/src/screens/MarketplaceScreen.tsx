@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ChevronRight,
   Flag,
   Globe,
   ImagePlus,
@@ -37,6 +38,7 @@ import { useAuth } from "../context/AuthContext";
 import { API_BASE_URL, apiFetch } from "../services/api";
 import { uploadMarketplaceImage } from "../services/uploadMarketplaceImage";
 import { MediaUploadError } from "../services/mediaUploadError";
+import { openProfileStore } from "../storage/profileStore";
 import type { MainTabParamList } from "../navigation/types";
 import VoiceTextInput from "../components/VoiceTextInput";
 import { EMBEDDED_PHONE_COUNTRIES } from "./auth/phoneNumber";
@@ -64,6 +66,7 @@ type MarketplaceItem = {
   currency: string;
   location: string;
   category: string;
+  countryOfOrigin?: string;
   seller: string;
   verified: boolean;
   phone: string;
@@ -115,6 +118,7 @@ const VALIDATION_FIELD_LABELS: Record<string, string> = {
   price: "Prix",
   currency: "Devise",
   country_code: "Pays",
+  country_of_origin: "Pays d'origine",
   "location.latitude": "Position (latitude)",
   "location.longitude": "Position (longitude)",
   media_public_id: "Photo",
@@ -159,6 +163,9 @@ const normalizeItem = (value: unknown): MarketplaceItem | null => {
       value.neighborhood ?? value.location_name ?? value.location ?? "",
     ),
     category: String(value.category ?? "Autre"),
+    ...(typeof value.country_of_origin === "string"
+      ? { countryOfOrigin: value.country_of_origin }
+      : {}),
     seller: String(
       seller?.name ?? value.seller_name ?? value.maker ?? value.provider_name ?? "Vendeur",
     ),
@@ -245,6 +252,10 @@ export default function MarketplaceScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
+  const [countryOriginModalVisible, setCountryOriginModalVisible] = useState(false);
+  const [countryOfOrigin, setCountryOfOrigin] = useState(
+    user?.country_code ?? "SN",
+  );
   const [draftTitle, setDraftTitle] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [draftPrice, setDraftPrice] = useState("");
@@ -292,10 +303,44 @@ export default function MarketplaceScreen() {
       setSearchText(params.voiceSearch);
     }
     if (params.voiceCreateListing) {
-      setActiveTab("Annonces");
+      const targetType = params.voiceCreateType ?? "listing";
+      setActiveTab(
+        targetType === "local"
+          ? "Local / Made in"
+          : targetType === "service"
+            ? "Services & Métiers"
+            : "Annonces",
+      );
       setIsCreateModalVisible(true);
     }
   }, [route.params]);
+
+  useEffect(() => {
+    let active = true;
+    void openProfileStore()
+      .then((store) => store.getCountry())
+      .then((country) => {
+        if (
+          active &&
+          country?.code &&
+          MARKET_COUNTRIES.some(({ code }) => code === country.code)
+        ) {
+          setCountryOfOrigin(country.code);
+        }
+      })
+      .catch(() => {
+        console.warn("Unable to load the active country for the marketplace.");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (user?.country_code && MARKET_COUNTRIES.some(({ code }) => code === user.country_code)) {
+      setCountryOfOrigin(user.country_code);
+    }
+  }, [user?.country_code]);
 
   useEffect(() => {
     let isMounted = true;
@@ -581,6 +626,13 @@ export default function MarketplaceScreen() {
       return;
     }
     if (
+      activeTab === "Local / Made in" &&
+      !MARKET_COUNTRIES.some(({ code }) => code === countryOfOrigin)
+    ) {
+      Alert.alert("Pays obligatoire", "Choisissez le pays d'origine du produit.");
+      return;
+    }
+    if (
       !isFreeListing &&
       (!draftPrice.trim() || !Number.isFinite(numericPrice) || numericPrice < 0)
     ) {
@@ -629,6 +681,9 @@ export default function MarketplaceScreen() {
           is_free: String(isFreeListing),
           currency: "FCFA",
           ...(user?.country_code ? { country_code: user.country_code } : {}),
+          ...(activeTab === "Local / Made in"
+            ? { country_of_origin: countryOfOrigin }
+            : {}),
           ...(isFreeListing ? {} : { price: String(numericPrice) }),
           location: JSON.stringify({
             latitude: userLocation.latitude,
@@ -669,6 +724,9 @@ export default function MarketplaceScreen() {
           price: isFreeListing ? 0 : numericPrice,
           currency: "FCFA",
           ...(user?.country_code ? { country_code: user.country_code } : {}),
+          ...(activeTab === "Local / Made in"
+            ? { country_of_origin: countryOfOrigin }
+            : {}),
           location: {
             latitude: userLocation.latitude,
             longitude: userLocation.longitude,
@@ -1206,6 +1264,22 @@ export default function MarketplaceScreen() {
                   </Pressable>
                 ))}
               </ScrollView>
+              {activeTab === "Local / Made in" && (
+                <>
+                  <Text style={styles.formLabel}>Pays d'origine</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setCountryOriginModalVisible(true)}
+                    style={styles.countryOriginButton}
+                  >
+                    <Text style={styles.countryOriginText}>
+                      {MARKET_COUNTRIES.find(({ code }) => code === countryOfOrigin)?.name ??
+                        countryOfOrigin}
+                    </Text>
+                    <ChevronRight color="#64748b" size={18} />
+                  </Pressable>
+                </>
+              )}
               <Text style={styles.formLabel}>Prix en FCFA</Text>
               <TextInput
                 accessibilityLabel="Prix en FCFA"
@@ -1295,6 +1369,36 @@ export default function MarketplaceScreen() {
                   <Text style={styles.publishButtonText}>Publier</Text>
                 )}
               </Pressable>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setCountryOriginModalVisible(false)}
+        transparent
+        visible={countryOriginModalVisible}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.countryOriginModal}>
+            <Text style={styles.modalTitle}>Pays d'origine</Text>
+            <ScrollView>
+              {MARKET_COUNTRIES.map((country) => (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: country.code === countryOfOrigin }}
+                  key={country.code}
+                  onPress={() => {
+                    setCountryOfOrigin(country.code);
+                    setCountryOriginModalVisible(false);
+                  }}
+                  style={styles.countryOriginOption}
+                >
+                  <Text style={styles.countryOriginText}>{country.name}</Text>
+                  <Text style={styles.countryOriginCode}>{country.code}</Text>
+                </Pressable>
+              ))}
             </ScrollView>
           </View>
         </View>
@@ -1890,6 +1994,34 @@ const styles = StyleSheet.create({
     color: "#334155",
     fontSize: 12,
     fontWeight: "700",
+  },
+  countryOriginButton: {
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    borderWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 46,
+    paddingHorizontal: 12,
+  },
+  countryOriginText: { color: "#334155", fontSize: 14 },
+  countryOriginCode: { color: "#64748b", fontSize: 12, fontWeight: "700" },
+  countryOriginModal: {
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    maxHeight: "80%",
+    padding: 20,
+    width: "90%",
+  },
+  countryOriginOption: {
+    alignItems: "center",
+    borderBottomColor: "#e2e8f0",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 12,
   },
   formCategoryList: {
     gap: 7,

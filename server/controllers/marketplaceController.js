@@ -50,6 +50,10 @@ export const createMarketplaceItem = async (request, response, next) => {
     typeof request.body?.country_code === "string"
       ? request.body.country_code.trim().toUpperCase()
       : null;
+  const countryOfOrigin =
+    typeof request.body?.country_of_origin === "string"
+      ? request.body.country_of_origin.trim().toUpperCase()
+      : null;
   const category =
     typeof request.body?.category === "string"
       ? request.body.category.trim().slice(0, 30)
@@ -76,6 +80,17 @@ export const createMarketplaceItem = async (request, response, next) => {
   if (!category) addError("category", "La catégorie est obligatoire.");
   if (!ITEM_TYPES.has(itemType)) {
     addError("item_type", "Choisissez une portée d'annonce valide.");
+  }
+  if (
+    itemType === "local" &&
+    (!countryOfOrigin || !/^[A-Z]{2,3}$/.test(countryOfOrigin))
+  ) {
+    addError("country_of_origin", "Le pays d'origine est obligatoire.");
+  } else if (
+    countryOfOrigin !== null &&
+    !/^[A-Z]{2,3}$/.test(countryOfOrigin)
+  ) {
+    addError("country_of_origin", "Choisissez un pays d'origine valide.");
   }
   if (!isFree && !Number.isFinite(price)) {
     addError("price", "Saisissez un prix valide ou choisissez Gratuit / Don.");
@@ -125,17 +140,17 @@ export const createMarketplaceItem = async (request, response, next) => {
     const result = await pool.query(
       `INSERT INTO marketplace_items
          (seller_id, title, description, price_fcfa, category, item_type,
-          image_urls, location, contact_phone, whatsapp_phone)
+          image_urls, location, contact_phone, whatsapp_phone, country_of_origin)
        SELECT profile.id, $2, $3, $4, $5, $6,
               CASE WHEN $7::text IS NULL THEN NULL ELSE ARRAY[$7::text] END,
               ST_SetSRID(ST_MakePoint($9, $8), 4326),
-              profile.phone_number, profile.phone_number
+              profile.phone_number, profile.phone_number, $11
        FROM users AS profile
        WHERE profile.id = $1
          AND ($10::text IS NULL OR profile.country_code = $10)
        RETURNING id, title, description, price_fcfa AS price,
                  price_fcfa = 0 AS is_free, category, item_type,
-                 image_urls[1] AS image_url, created_at,
+                 image_urls[1] AS image_url, country_of_origin, created_at,
                  (SELECT profile.full_name FROM users AS profile
                   WHERE profile.id = seller_id) AS seller_name,
                  (SELECT profile.phone_number FROM users AS profile
@@ -151,6 +166,7 @@ export const createMarketplaceItem = async (request, response, next) => {
         latitude,
         longitude,
         countryCode,
+        countryOfOrigin,
       ],
     );
     if (!result.rowCount) {

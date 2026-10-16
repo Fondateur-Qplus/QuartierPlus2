@@ -20,6 +20,7 @@ import {
 } from "../controllers/proFeatureController.js";
 import { authMiddleware } from "../middlewares/authMiddleware.js";
 import { proRoleGuard } from "../middlewares/proRoleGuard.js";
+import { activateFreeOffer } from "../controllers/proOfferController.js";
 
 const router = Router();
 
@@ -28,6 +29,7 @@ router.use((_request, response, next) => {
   return next();
 });
 router.use(authMiddleware);
+router.post("/offers/activate", activateFreeOffer);
 router.get("/me/subscription", getMySubscription);
 router.get(
   "/merchant/dashboard",

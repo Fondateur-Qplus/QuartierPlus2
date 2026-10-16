@@ -6,6 +6,7 @@ import {
   getFedaPayTransaction,
 } from "../services/fedapay.js";
 import { issueTicket } from "../services/tickets.service.js";
+import { getCloudinaryAsset } from "../services/cloudinary.js";
 
 const OFFERS = {
   ALLIANCE_PRO: {
@@ -48,31 +49,41 @@ const normalizePhone = (phone, prefix) => {
 
 const validatePin = (value) => {
   if (!value || typeof value !== "object") return null;
-  const title = typeof value.title === "string" ? value.title.trim() : "";
-  const latitude = Number(value.latitude);
-  const longitude = Number(value.longitude);
+  const merchantItemId =
+    typeof value.merchant_item_id === "string" ? value.merchant_item_id : "";
+  const caption = typeof value.caption === "string" ? value.caption.trim() : "";
   if (
-    !title ||
-    title.length > 150 ||
-    !Number.isFinite(latitude) ||
-    !Number.isFinite(longitude) ||
-    Math.abs(latitude) > 90 ||
-    Math.abs(longitude) > 180
+    !/^[0-9a-f-]{36}$/i.test(merchantItemId) ||
+    !caption ||
+    caption.length > 300
   ) {
     return null;
   }
   return {
-    title,
-    latitude,
-    longitude,
-    icon_url:
-      typeof value.icon_url === "string" && value.icon_url.length <= 2048
-        ? value.icon_url
-        : null,
+    merchant_item_id: merchantItemId,
+    caption,
+    media_public_id:
+      typeof value.media_public_id === "string" ? value.media_public_id : null,
   };
 };
 
+const validatePublication = (value) => {
+  if (!value || typeof value !== "object") return null;
+  const title = typeof value.title === "string" ? value.title.trim() : "";
+  const description =
+    typeof value.description === "string" ? value.description.trim() : "";
+  if (!title || title.length > 150 || !description || description.length > 500) {
+    return null;
+  }
+  return { title, description };
+};
+
 export const createTransaction = async (request, response, next) => {
+  if (!env.billingEnabled) {
+    return response.status(403).json({
+      error: "Le paiement est désactivé pendant la phase de test.",
+    });
+  }
   const paymentType = request.body?.payment_type;
   const offer = Object.hasOwn(OFFERS, paymentType) ? OFFERS[paymentType] : null;
   if (!offer) {
@@ -81,13 +92,59 @@ export const createTransaction = async (request, response, next) => {
 
   const pin =
     paymentType === "SPONSORED_PIN" ? validatePin(request.body?.pin) : null;
+  const publication =
+    paymentType === "SPONSORED_PIN"
+      ? null
+      : validatePublication(request.body?.publication);
   if (paymentType === "SPONSORED_PIN" && !pin) {
     return response.status(400).json({
-      error: "Le titre et une position GPS valide sont requis pour l'épingle.",
+      error: "Choisissez un commerce et saisissez un texte court pour l'épingle.",
+    });
+  }
+  if (paymentType !== "SPONSORED_PIN" && offer && !publication) {
+    return response.status(400).json({
+      error: "Le nom de la structure et sa présentation sont obligatoires.",
     });
   }
 
   try {
+    if (paymentType === "SPONSORED_PIN") {
+      const ownedItem = await pool.query(
+        `SELECT id FROM marketplace_items
+         WHERE id = $1 AND seller_id = $2`,
+        [pin.merchant_item_id, request.auth.userId],
+      );
+      if (!ownedItem.rowCount) {
+        return response.status(400).json({
+          error: "Le commerce sélectionné ne vous appartient pas.",
+        });
+      }
+      if (pin.media_public_id) {
+        const publicId = pin.media_public_id;
+        if (
+          publicId.length > 255 ||
+          !publicId.startsWith(`${request.auth.userId}_`)
+        ) {
+          return response.status(400).json({
+            error: "La photo téléversée ne vous appartient pas.",
+          });
+        }
+        const asset = await getCloudinaryAsset("image", publicId);
+        if (
+          !asset ||
+          asset.public_id !== publicId ||
+          typeof asset.secure_url !== "string" ||
+          !asset.secure_url.startsWith(
+            `https://res.cloudinary.com/${env.cloudinaryCloudName}/`,
+          )
+        ) {
+          return response.status(400).json({
+            error: "La photo téléversée est introuvable ou invalide.",
+          });
+        }
+        pin.icon_url = asset.secure_url;
+      }
+    }
     const userResult = await pool.query(
       `SELECT u.full_name, u.email, u.phone_number, u.country_code,
               c.phone_prefix
@@ -121,7 +178,10 @@ export const createTransaction = async (request, response, next) => {
       description: offer.description,
       customer,
     });
-    const metadata = pin ? { pin } : {};
+    const metadata = {
+      ...(pin ? { pin } : {}),
+      ...(publication ? { publication } : {}),
+    };
     const saved = await pool.query(
       `INSERT INTO transactions
          (user_id, fedapay_tx_id, amount, currency, payment_type, metadata)
@@ -326,17 +386,27 @@ export const handleFedaPayWebhook = async (request, response, next) => {
           }
           if (payment.payment_type !== "SPONSORED_PIN") {
             await connection.query(
-              `INSERT INTO subscriptions (user_id, plan_type, status, starts_at, expires_at)
-               VALUES ($1, $2, 'ACTIVE', NOW(), NOW() + ($3 * INTERVAL '1 day'))
+              `INSERT INTO subscriptions
+                 (user_id, plan_type, status, starts_at, expires_at, publication)
+               VALUES (
+                 $1, $2, 'ACTIVE', NOW(),
+                 NOW() + ($3 * INTERVAL '1 day'), $4::jsonb
+               )
                ON CONFLICT (user_id, plan_type) DO UPDATE
                SET status = 'ACTIVE',
+                   publication = EXCLUDED.publication,
                    starts_at = CASE
                      WHEN subscriptions.expires_at <= NOW() THEN NOW()
                      ELSE subscriptions.starts_at
                    END,
                    expires_at = GREATEST(subscriptions.expires_at, NOW())
                      + ($3 * INTERVAL '1 day')`,
-              [payment.user_id, payment.payment_type, offer.durationDays],
+              [
+                payment.user_id,
+                payment.payment_type,
+                offer.durationDays,
+                JSON.stringify(payment.metadata?.publication ?? {}),
+              ],
             );
             if (payment.payment_type === "ALLIANCE_PRO") {
               await connection.query(
@@ -351,13 +421,13 @@ export const handleFedaPayWebhook = async (request, response, next) => {
             }
             await connection.query(
               `INSERT INTO sponsored_pins
-                 (user_id, title, location, icon_url, starts_at, expires_at, is_active)
-               VALUES (
-                 $1, $2,
-                 ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography,
-                 $5, NOW(), NOW() + INTERVAL '7 days', TRUE
-               )`,
-              [payment.user_id, pin.title, pin.longitude, pin.latitude, pin.icon_url ?? null],
+                 (user_id, title, location, icon_url, caption, marketplace_item_id,
+                  starts_at, expires_at, is_active)
+               SELECT $1, item.title, item.location::geography, $2, $3, item.id,
+                      NOW(), NOW() + INTERVAL '7 days', TRUE
+               FROM marketplace_items AS item
+               WHERE item.id = $4 AND item.seller_id = $1`,
+              [payment.user_id, pin.icon_url ?? null, pin.caption, pin.merchant_item_id],
             );
           }
         }

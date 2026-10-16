@@ -115,6 +115,12 @@ const buildQueuedRequestBody = async (action: SyncAction) => {
       item_type: String(action.payload.item_type ?? "listing"),
       is_free: isFree,
       price: isFree ? 0 : Number(action.payload.price),
+      ...(typeof action.payload.country_code === "string"
+        ? { country_code: action.payload.country_code }
+        : {}),
+      ...(typeof action.payload.country_of_origin === "string"
+        ? { country_of_origin: action.payload.country_of_origin }
+        : {}),
       location,
       ...(mediaPublicId ? { media_public_id: mediaPublicId } : {}),
     };

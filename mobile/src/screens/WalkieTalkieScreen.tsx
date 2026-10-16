@@ -18,7 +18,8 @@ type ActiveSpeaker = {
   name: string;
 };
 
-const TALKIE_WALKIE_UNAVAILABLE = "Talkie-walkie indisponible";
+const TALKIE_WALKIE_UNAVAILABLE =
+  "Service vidéo/voix en cours d'activation";
 
 const speakerLabel = (participant: Participant): ActiveSpeaker => ({
   identity: participant.identity,
@@ -139,12 +140,7 @@ export default function WalkieTalkieScreen() {
       if (pressedRef.current) setIsTalking(true);
     } catch (talkError) {
       pressedRef.current = false;
-      setError(
-        talkError instanceof Error &&
-          talkError.message === TALKIE_WALKIE_UNAVAILABLE
-          ? TALKIE_WALKIE_UNAVAILABLE
-          : "Impossible d'activer le microphone.",
-      );
+      setError(TALKIE_WALKIE_UNAVAILABLE);
     }
   };
 

@@ -52,6 +52,8 @@ type GrinChair = {
 };
 
 const MAX_CHAIRS = 6;
+const LIVEKIT_UNAVAILABLE_MESSAGE =
+  "Service vidéo/voix en cours d'activation";
 
 const readChairs = (room: Room): GrinChair[] => {
   const participants = [
@@ -134,7 +136,7 @@ export default function GrinScreen() {
           body: JSON.stringify({ roomName: "grin" }),
         });
         if (!response.ok) {
-          throw new Error(`Connexion au Grin refusée (HTTP ${response.status}).`);
+          throw new Error(LIVEKIT_UNAVAILABLE_MESSAGE);
         }
         const payload: unknown = await response.json();
         if (
@@ -145,7 +147,7 @@ export default function GrinScreen() {
           !("url" in payload) ||
           typeof payload.url !== "string"
         ) {
-          throw new Error("La réponse LiveKit est invalide.");
+          throw new Error(LIVEKIT_UNAVAILABLE_MESSAGE);
         }
 
         await AudioSession.startAudioSession();
@@ -219,9 +221,10 @@ export default function GrinScreen() {
     void connect().catch((connectError: unknown) => {
       if (!mountedRef.current) return;
       setError(
-        connectError instanceof Error
+        connectError instanceof Error &&
+          /connectez-vous|connexion internet/i.test(connectError.message)
           ? connectError.message
-          : "Impossible de rejoindre le Grin.",
+          : LIVEKIT_UNAVAILABLE_MESSAGE,
       );
     });
     return () => {
@@ -259,8 +262,11 @@ export default function GrinScreen() {
     } catch (joinError) {
       setError(
         joinError instanceof Error
+          && /six chaises|autorisez la caméra et le microphone/i.test(
+            joinError.message,
+          )
           ? joinError.message
-          : "Impossible de prendre une chaise.",
+          : LIVEKIT_UNAVAILABLE_MESSAGE,
       );
     }
   };
@@ -314,13 +320,7 @@ export default function GrinScreen() {
   };
 
   const retryConnection = () => {
-    void connect().catch((connectError: unknown) => {
-      setError(
-        connectError instanceof Error
-          ? connectError.message
-          : "Impossible de rejoindre le Grin.",
-      );
-    });
+    void connect().catch(() => setError(LIVEKIT_UNAVAILABLE_MESSAGE));
   };
 
   const togglePictureInPicture = () => {

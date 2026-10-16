@@ -50,7 +50,10 @@ Puis exécutez, sans supprimer de table ni de données, dans cet ordre :
 15. `migrations/012_sos_moderation_queue.sql`
 16. `migrations/013_map_lost_items.sql`
 17. `migrations/014_sos_audio_media.sql`
-18. `server/db/seeds.sql`
+18. `migrations/015_marketplace_country_of_origin.sql`
+19. `migrations/016_sponsored_pin_publication.sql`
+20. `migrations/017_pro_offer_publication.sql`
+21. `server/db/seeds.sql`
 
 Pour une base Neon neuve, exécutez chaque fichier une seule fois dans l'éditeur
 SQL, dans cet ordre. `auth-migration.sql` utilise des opérations idempotentes
@@ -75,6 +78,10 @@ d'urgence facultatif. Le seed doit être appliqué après 011 afin que les deux
 canaux soient créés pour chaque pays. Au démarrage, le
 serveur les upsert à nouveau pour réparer les canaux manquants sans produire
 de 404 pour un compte n'ayant encore aucune conversation.
+
+Les migrations 015 à 017 ajoutent les champs utilisés par les publications
+Made in, les épingles sponsorisées et les détails d'offres Pro. Appliquez-les
+avant de déployer cette version de l'API.
 
 ## 2. Créer le service web Render
 
@@ -118,9 +125,6 @@ leurs vraies valeurs dans Render ; ne les inscrivez pas dans le dépôt.
 | `JWT_SECRET` | Secret aléatoire d'au moins 32 caractères |
 | `TICKET_QR_SECRET` | Autre secret aléatoire stable d'au moins 32 caractères |
 | `GOOGLE_CLIENT_ID` | Identifiant OAuth client Web Google utilisé par l'application |
-| `LIVEKIT_API_KEY` | Clé API du projet LiveKit |
-| `LIVEKIT_API_SECRET` | Secret API correspondant de LiveKit |
-| `LIVEKIT_URL` | URL WebSocket LiveKit en `wss://` |
 | `SMS_DELIVERY_URL` | URL HTTPS du relais SMS de production |
 | `SMS_DELIVERY_TOKEN` | Jeton du relais SMS |
 | `EMAIL_PROVIDER` | `resend` pour activer l’adaptateur e-mail |
@@ -146,11 +150,15 @@ invaliderait les signatures des billets déjà émis.
 | `JWT_EXPIRES_IN` | Durée de validité des jetons ; valeur par défaut : `7d` |
 | `OTP_TEST_ALLOWLIST` | Numéros E.164 séparés par des virgules, uniquement pour le code OTP de test hors production |
 | `IS_PROMO_FREE_ACCESS` | `true` ou `false` pour le mode découverte |
+| `BILLING_ENABLED` | `false` (défaut) active gratuitement les offres; `true` utilise le paiement FedaPay |
 | `FEDAPAY_SECRET_KEY` | Clé secrète FedaPay pour les paiements |
 | `FEDAPAY_PUBLIC_KEY` | Clé publique FedaPay |
 | `FEDAPAY_ENVIRONMENT` | `sandbox` pour les tests, `live` pour la production |
 | `FEDAPAY_WEBHOOK_SECRET` | Secret configuré dans l'en-tête du webhook FedaPay |
 | `SOCKET_CORS_ORIGIN` | Origines web autorisées, séparées par des virgules |
+| `LIVEKIT_API_KEY` | Clé API du projet LiveKit |
+| `LIVEKIT_API_SECRET` | Secret API correspondant de LiveKit |
+| `LIVEKIT_URL` | URL WebSocket LiveKit en `wss://` |
 | `CLOUDINARY_CLOUD_NAME` | Nom du cloud Cloudinary utilisé par l'API de publication |
 | `CLOUDINARY_API_KEY` | Clé API Cloudinary |
 | `CLOUDINARY_API_SECRET` | Secret API Cloudinary; reste uniquement sur Render |
@@ -162,6 +170,11 @@ invaliderait les signatures des billets déjà émis.
 Les trois variables `CLOUDINARY_*` doivent être configurées ensemble pour
 activer les publications; aucune ne doit être copiée dans l'application mobile.
 Les variables `POST_*` sont facultatives et remplacent les limites par défaut.
+LiveKit est facultatif au démarrage : si sa configuration est absente ou
+invalide, les fonctions vidéo et voix indiquent qu'elles sont en cours
+d'activation. Quand `BILLING_ENABLED=false`, les offres sont activées
+immédiatement et affichées comme gratuites pendant la phase de test; mettez-le
+à `true` uniquement après avoir configuré FedaPay.
 
 `PORT` est fourni par Render : ne le créez pas manuellement. `OTP_TEST_MODE`
 doit être absent ou `false` en production ; le serveur refuse `true`, même si

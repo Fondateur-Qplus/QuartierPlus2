@@ -8,6 +8,7 @@ export type MainTabParamList = {
         voiceRequestId?: string;
         voiceSearch?: string;
         voiceCreateListing?: boolean;
+        voiceCreateType?: "listing" | "local" | "service";
       }
     | undefined;
   Messages:
@@ -52,4 +53,5 @@ export type RootStackParamList = {
   CompleteProfile: undefined;
   Main: NavigatorScreenParams<MainTabParamList>;
   Checkout: undefined;
+  MyActivity: { activity: "listings" | "services" | "alerts" };
 };

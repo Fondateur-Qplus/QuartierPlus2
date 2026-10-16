@@ -1,4 +1,5 @@
 import * as SQLite from "expo-sqlite";
+import * as SecureStore from "expo-secure-store";
 import { getSharedDatabase } from "../services/database";
 
 export type EmergencyNumbers = {
@@ -41,6 +42,7 @@ export type ProfileStore = {
 };
 
 const LEGACY_DATABASE_NAME = "quartierplus-profile.db";
+const PREFERENCES_FALLBACK_KEY = "quartierplus.profile.preferences";
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 const hasTable = async (database: SQLite.SQLiteDatabase, name: string) => {
@@ -167,21 +169,38 @@ export const openProfileStore = async (): Promise<ProfileStore> => {
       });
     },
     async getPreferences() {
-      const rows = await database.getAllAsync<{ key: string; value: string }>(
-        "SELECT key, value FROM profile.app_preferences",
-      );
+      let rows: { key: string; value: string }[];
+      try {
+        rows = await database.getAllAsync<{ key: string; value: string }>(
+          "SELECT key, value FROM app_preferences",
+        );
+      } catch (error) {
+        console.warn("SQLite preferences are unavailable; using AsyncStorage.");
+        let fallback: string | null;
+        try {
+          const { default: AsyncStorage } = await import(
+            "@react-native-async-storage/async-storage"
+          );
+          fallback = await AsyncStorage.getItem(PREFERENCES_FALLBACK_KEY);
+        } catch {
+          fallback = await SecureStore.getItemAsync(PREFERENCES_FALLBACK_KEY);
+        }
+        if (!fallback) return defaultPreferences();
+        try {
+          return normalizePreferences(JSON.parse(fallback));
+        } catch {
+          throw new Error("Les préférences locales enregistrées sont invalides.");
+        }
+      }
       const values = new Map(rows.map((row) => [row.key, row.value]));
-      const theme = values.get("theme");
-      const language = values.get("language");
-      const radius = Number(values.get("default_radius_km"));
-      return {
-        theme: theme === "dark" ? "dark" : "light",
-        language: language === "en" ? "en" : "fr",
+      return normalizePreferences({
+        theme: values.get("theme"),
+        language: values.get("language"),
         sosNotificationsEnabled: values.get("sos_notifications") !== "false",
-        defaultRadiusKm: radius === 10 || radius === 30 ? radius : 3,
+        defaultRadiusKm: Number(values.get("default_radius_km")),
         voiceAssistantFloatingButton:
           values.get("voice_assistant_floating_button") === "true",
-      };
+      });
     },
     async setPreferences(preferences) {
       const entries: [string, string][] = [
@@ -194,17 +213,59 @@ export const openProfileStore = async (): Promise<ProfileStore> => {
           String(preferences.voiceAssistantFloatingButton),
         ],
       ];
-      await database.withExclusiveTransactionAsync(async (transaction) => {
-        for (const [key, value] of entries) {
-          await transaction.runAsync(
-            `INSERT INTO profile.app_preferences (key, value)
-             VALUES (?, ?)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-            key,
-            value,
+      try {
+        await database.withExclusiveTransactionAsync(async (transaction) => {
+          for (const [key, value] of entries) {
+            await transaction.runAsync(
+              `INSERT INTO app_preferences (key, value)
+               VALUES (?, ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+              key,
+              value,
+            );
+          }
+        });
+      } catch (error) {
+        console.warn("SQLite preferences are unavailable; using AsyncStorage.");
+        try {
+          const { default: AsyncStorage } = await import(
+            "@react-native-async-storage/async-storage"
+          );
+          await AsyncStorage.setItem(
+            PREFERENCES_FALLBACK_KEY,
+            JSON.stringify(preferences),
+          );
+        } catch {
+          await SecureStore.setItemAsync(
+            PREFERENCES_FALLBACK_KEY,
+            JSON.stringify(preferences),
           );
         }
-      });
+      }
     },
+  };
+};
+
+const defaultPreferences = (): AppPreferences => ({
+  theme: "light",
+  language: "fr",
+  sosNotificationsEnabled: true,
+  defaultRadiusKm: 3,
+  voiceAssistantFloatingButton: false,
+});
+
+const normalizePreferences = (value: unknown): AppPreferences => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return defaultPreferences();
+  }
+  const preferences = value as Partial<AppPreferences>;
+  const radius = Number(preferences.defaultRadiusKm);
+  return {
+    theme: preferences.theme === "dark" ? "dark" : "light",
+    language: preferences.language === "en" ? "en" : "fr",
+    sosNotificationsEnabled: preferences.sosNotificationsEnabled !== false,
+    defaultRadiusKm: radius === 10 || radius === 30 ? radius : 3,
+    voiceAssistantFloatingButton:
+      preferences.voiceAssistantFloatingButton === true,
   };
 };

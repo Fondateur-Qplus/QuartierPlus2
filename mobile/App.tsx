@@ -52,6 +52,7 @@ import MarketplaceScreen from "./src/screens/MarketplaceScreen";
 import MessagesScreen from "./src/screens/MessagesScreen";
 import SettingsScreen from "./src/screens/SettingsScreen";
 import CheckoutScreen from "./src/screens/main/CheckoutScreen";
+import MyActivityScreen from "./src/screens/MyActivityScreen";
 import ProTabNavigator from "./src/navigation/ProTabNavigator";
 import EventsNavigator from "./src/navigation/EventsNavigator";
 import WalkieTalkieScreen from "./src/screens/WalkieTalkieScreen";
@@ -213,6 +214,7 @@ function RootNavigator() {
         <Stack.Screen name="Welcome" component={GuestWelcomeScreen} />
       )}
       <Stack.Screen name="Main" component={MainTabs} />
+      <Stack.Screen name="MyActivity" component={MyActivityScreen} />
       <Stack.Screen name="PhoneAuth" component={PhoneAuthScreen} />
       {user && !hasCompletedProfile && (
         <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />

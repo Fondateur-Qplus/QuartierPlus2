@@ -1,4 +1,31 @@
 import { pool } from "../db/pool.js";
+import { env } from "../config/env.js";
+
+const CLOUDINARY_VARIABLES = [
+  ["CLOUDINARY_CLOUD_NAME", env.cloudinaryCloudName],
+  ["CLOUDINARY_API_KEY", env.cloudinaryApiKey],
+  ["CLOUDINARY_API_SECRET", env.cloudinaryApiSecret],
+];
+const isCloudinaryValueMissing = (value) =>
+  !value ||
+  /(?:your[-_]|replace[-_]?with|fake|placeholder|changeme|example(?:\.|$))/i.test(
+    value,
+  );
+
+export const getPublicConfig = (_request, response) =>
+  response.status(200).json({ billingEnabled: env.billingEnabled });
+
+export const getMediaStatus = (_request, response) => {
+  const cloudinaryMissing = CLOUDINARY_VARIABLES
+    .filter(([, value]) => isCloudinaryValueMissing(value))
+    .map(([name]) => name);
+  const livekitMissing = env.livekitConfigurationProblems;
+  return response.status(200).json({
+    cloudinaryConfigured: cloudinaryMissing.length === 0,
+    livekitConfigured: env.livekitConfigurationIsUsable,
+    missing: [...cloudinaryMissing, ...livekitMissing],
+  });
+};
 
 const nearbyFilter = (query) => {
   const { latitude, longitude, radius_m: radius, scope } = query;
@@ -79,7 +106,7 @@ export const listPublicMarketplace = async (_request, response, next) => {
       `SELECT item.id, item.title, item.description, item.category,
               item.item_type,
               item.price_fcfa AS price, item.price_fcfa = 0 AS is_free,
-              item.created_at, user_profile.neighborhood,
+              item.country_of_origin, item.created_at, user_profile.neighborhood,
               user_profile.full_name AS seller_name,
               user_profile.phone_number AS seller_phone,
               item.whatsapp_phone, item.image_urls[1] AS image_url

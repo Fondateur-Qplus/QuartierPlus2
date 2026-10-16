@@ -38,12 +38,31 @@ test("production environment accepts a complete valid configuration", () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
-test("production environment rejects missing service credentials", () => {
-  for (const name of ["SMS_DELIVERY_TOKEN", "GOOGLE_CLIENT_ID", "LIVEKIT_API_SECRET"]) {
+test("production environment rejects missing required service credentials", () => {
+  for (const name of ["SMS_DELIVERY_TOKEN", "GOOGLE_CLIENT_ID"]) {
     const result = loadProductionConfig({ [name]: "" });
     assert.notEqual(result.status, 0, `${name} should be required`);
     assert.match(result.stderr, new RegExp(name));
   }
+});
+
+test("production environment remains available when LiveKit is misconfigured", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      "import { env } from './config/env.js'; console.log(JSON.stringify({ usable: env.livekitConfigurationIsUsable, problems: env.livekitConfigurationProblems }))",
+    ],
+    {
+      cwd: serverDirectory,
+      env: { ...productionEnv, LIVEKIT_URL: "ws://invalid.example.invalid", DOTENV_CONFIG_PATH: "/dev/null" },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /"usable":false/);
+  assert.match(result.stdout, /LIVEKIT_URL/);
 });
 
 test("production environment rejects test OTP mode even with an allowlisted number", () => {
@@ -65,9 +84,9 @@ test("production environment rejects malformed OTP allowlist entries", () => {
 
 test("production environment rejects malformed URLs and boolean variables", () => {
   for (const [name, value] of [
-    ["LIVEKIT_URL", "ws://livekit.example.invalid"],
     ["PGSSL", "yes"],
     ["IS_PROMO_FREE_ACCESS", "sometimes"],
+    ["BILLING_ENABLED", "sometimes"],
   ]) {
     const result = loadProductionConfig({ [name]: value });
     assert.notEqual(result.status, 0, `${name} should be validated`);
@@ -75,21 +94,34 @@ test("production environment rejects malformed URLs and boolean variables", () =
   }
 });
 
-test("production environment rejects placeholder LiveKit credentials", () => {
-  const result = loadProductionConfig({
-    LIVEKIT_API_KEY: "your-livekit-api-key",
-  });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /LIVEKIT_API_KEY/);
-  assert.match(result.stderr, /Invalid or missing LiveKit configuration/);
+test("production environment marks placeholder LiveKit credentials unavailable", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      "import { env } from './config/env.js'; console.log(JSON.stringify({ usable: env.livekitConfigurationIsUsable, problems: env.livekitConfigurationProblems }))",
+    ],
+    {
+      cwd: serverDirectory,
+      env: {
+        ...productionEnv,
+        LIVEKIT_API_KEY: "your-livekit-api-key",
+        DOTENV_CONFIG_PATH: "/dev/null",
+      },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /"usable":false/);
+  assert.match(result.stdout, /LIVEKIT_API_KEY/);
 });
 
-test("production environment requires Cloudinary credentials as a complete set", () => {
+test("production environment remains available with partial Cloudinary settings", () => {
   const result = loadProductionConfig({
     CLOUDINARY_CLOUD_NAME: "quartierplus",
   });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Missing variable\(s\): CLOUDINARY_API_KEY/);
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test("media limits are configurable positive integers", () => {

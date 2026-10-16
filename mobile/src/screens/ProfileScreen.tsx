@@ -116,7 +116,7 @@ const ACTIVITIES = [
   { id: "listings", label: "Mes Annonces & Produits", icon: User },
   { id: "services", label: "Mes Services proposés", icon: Settings },
   { id: "alerts", label: "Mes Alertes & Signalements émis", icon: Siren },
-];
+] as const;
 
 const PLUS_DESTINATIONS = [
   { screen: "Talkie", label: "Talkie-Walkie" },
@@ -162,6 +162,7 @@ export default function ProfileScreen() {
   const [phoneOtpRequested, setPhoneOtpRequested] = useState(false);
   const [isUpdatingPhone, setIsUpdatingPhone] = useState(false);
   const [aboutVisible, setAboutVisible] = useState(false);
+  const [privacyVisible, setPrivacyVisible] = useState(false);
   const [termsVisible, setTermsVisible] = useState(false);
   const [technicalStatus, setTechnicalStatus] = useState(getTechnicalAvailability);
   const [serverHealth, setServerHealth] = useState<ServerHealth | null>(
@@ -207,12 +208,10 @@ export default function ProfileScreen() {
         setDatabaseReady(true);
       } catch (error) {
         if (!isMounted) return;
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Impossible de charger les données locales.";
+        console.warn("Local profile storage could not be initialized.");
+        const message = "Les réglages hors ligne sont momentanément indisponibles.";
         setDatabaseError(message);
-        Alert.alert("Stockage hors ligne indisponible", message);
+        Alert.alert("Stockage hors ligne indisponible", "Réessayez dans quelques instants.");
       }
     })();
     return () => {
@@ -460,15 +459,8 @@ export default function ProfileScreen() {
     }
   };
 
-  const showAddContact = () => {
-    Alert.alert(
-      "Ajouter un contact SOS",
-      "L'ajout de contacts sera bientôt disponible.",
-    );
-  };
-
-  const showActivity = (label: string) => {
-    Alert.alert(label, "Cette activité sera bientôt disponible.");
+  const showActivity = (activity: "listings" | "services" | "alerts") => {
+    navigation.navigate("MyActivity", { activity });
   };
 
   const showLogoutConfirmation = () => {
@@ -510,9 +502,7 @@ export default function ProfileScreen() {
     } catch (error) {
       Alert.alert(
         "Enregistrement impossible",
-        error instanceof Error
-          ? error.message
-          : "Impossible d'enregistrer vos préférences.",
+        "Impossible d'enregistrer vos préférences. Réessayez.",
       );
     }
   };
@@ -1086,7 +1076,7 @@ export default function ProfileScreen() {
                 <Pressable
                   accessibilityRole="button"
                   key={activity.id}
-                  onPress={() => showActivity(activity.label)}
+                  onPress={() => showActivity(activity.id)}
                   style={[
                     styles.menuRow,
                     index < ACTIVITIES.length - 1 && styles.menuRowBorder,
@@ -1202,12 +1192,7 @@ export default function ProfileScreen() {
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              onPress={() =>
-                Alert.alert(
-                  "Confidentialité",
-                  "Les paramètres de confidentialité seront bientôt disponibles.",
-                )
-              }
+              onPress={() => setPrivacyVisible(true)}
               style={styles.menuRow}
             >
               <Lock color="#2563eb" size={19} />
@@ -1239,6 +1224,44 @@ export default function ProfileScreen() {
           <Text style={styles.footerText}>QuartierPlus · Profil communautaire</Text>
         </View>
       </ScrollView>
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setPrivacyVisible(false)}
+        transparent
+        visible={privacyVisible}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text accessibilityRole="header" style={styles.modalTitle}>
+              Confidentialité
+            </Text>
+            <Text style={styles.settingDescription}>
+              Vos préférences restent enregistrées sur cet appareil. Les réglages
+              de notifications SOS et de localisation peuvent être modifiés ici.
+            </Text>
+            <View style={styles.privacySetting}>
+              <Text style={styles.menuLabel}>Notifications SOS</Text>
+              <Switch
+                accessibilityLabel="Notifications SOS"
+                onValueChange={(enabled) =>
+                  void updatePreferences({
+                    ...preferences,
+                    sosNotificationsEnabled: enabled,
+                  })
+                }
+                value={preferences.sosNotificationsEnabled}
+              />
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setPrivacyVisible(false)}
+              style={styles.primaryAction}
+            >
+              <Text style={styles.primaryActionText}>Fermer</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
       <Modal
         animationType="slide"
         onRequestClose={() => setAboutVisible(false)}
@@ -1937,6 +1960,12 @@ const styles = StyleSheet.create({
     gap: 10,
     minHeight: 50,
     paddingVertical: 8,
+  },
+  privacySetting: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 14,
   },
   menuRowBorder: {
     borderBottomColor: "#f1f5f9",

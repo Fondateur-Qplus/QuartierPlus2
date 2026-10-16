@@ -1,11 +1,15 @@
 import { useNavigation, type NavigationProp } from "@react-navigation/native";
-import { ArrowLeft, CheckCircle2, CreditCard, MapPin, ShieldCheck } from "lucide-react-native";
-import * as Location from "expo-location";
+import { ArrowLeft, CheckCircle2, ImagePlus, MapPin, ShieldCheck } from "lucide-react-native";
 import * as WebBrowser from "expo-web-browser";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import * as ImageManipulator from "expo-image-manipulator";
+import * as ImagePicker from "expo-image-picker";
+import { File } from "expo-file-system";
 import {
   ActivityIndicator,
   Alert,
+  Image,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,6 +20,7 @@ import {
 import { useAuth } from "../../context/AuthContext";
 import type { RootStackParamList } from "../../navigation/types";
 import { API_BASE_URL, apiFetch } from "../../services/api";
+import { uploadMarketplaceImage } from "../../services/uploadMarketplaceImage";
 
 type Offer =
   | "ALLIANCE_PRO"
@@ -75,39 +80,112 @@ const readError = async (response: Awaited<ReturnType<typeof apiFetch>>) => {
     : `La demande a échoué (HTTP ${response.status}).`;
 };
 
+type MerchantItem = { id: string; title: string };
+const MAX_PHOTO_BYTES = 300 * 1024;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 export default function CheckoutScreen() {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { refreshUser } = useAuth();
   const [offer, setOffer] = useState<Offer>("ALLIANCE_PRO");
-  const [pinTitle, setPinTitle] = useState("");
-  const [pinLocation, setPinLocation] =
-    useState<Location.LocationObjectCoords | null>(null);
+  const [merchantItems, setMerchantItems] = useState<MerchantItem[]>([]);
+  const [merchantId, setMerchantId] = useState("");
+  const [merchantPickerVisible, setMerchantPickerVisible] = useState(false);
+  const [pinCaption, setPinCaption] = useState("");
+  const [publicationTitle, setPublicationTitle] = useState("");
+  const [publicationDescription, setPublicationDescription] = useState("");
+  const [pinPhoto, setPinPhoto] = useState<{ uri: string; size: number } | null>(null);
+  const [billingEnabled, setBillingEnabled] = useState(true);
+  const [billingConfigLoaded, setBillingConfigLoaded] = useState(false);
+  const [uploadedPhotoId, setUploadedPhotoId] = useState<string | null>(null);
+  const [offerActivatedFree, setOfferActivatedFree] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
 
-  const selectOffer = async (nextOffer: Offer) => {
-    setOffer(nextOffer);
-    if (nextOffer !== "SPONSORED_PIN" || pinLocation) return;
-    try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (permission.status !== "granted") {
-        Alert.alert(
-          "Position requise",
-          "Autorisez l'accès à la position pour placer votre épingle sponsorisée.",
-        );
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      if (!API_BASE_URL) {
+        setBillingConfigLoaded(true);
         return;
       }
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
+      try {
+        const [config, merchantResponse] = await Promise.all([
+          apiFetch(`${API_BASE_URL}/v1/public/config`, {
+            headers: { "Cache-Control": "no-cache" },
+          }),
+          apiFetch(`${API_BASE_URL}/v1/users/me/marketplace-items?item_type=products`, {
+            headers: { "Cache-Control": "no-cache" },
+          }),
+        ]);
+        if (!config.ok) throw new Error("La configuration des offres est indisponible.");
+        const configPayload: unknown = await config.json();
+        if (!isRecord(configPayload) || typeof configPayload.billingEnabled !== "boolean") {
+          throw new Error("La configuration des offres est invalide.");
+        }
+        if (active) setBillingEnabled(configPayload.billingEnabled);
+        if (merchantResponse.ok) {
+          const merchantPayload: unknown = await merchantResponse.json();
+          const rows = isRecord(merchantPayload) && Array.isArray(merchantPayload.items)
+            ? merchantPayload.items
+            : [];
+          const normalized = rows.flatMap((row): MerchantItem[] =>
+            isRecord(row) && typeof row.id === "string" && typeof row.title === "string"
+              ? [{ id: row.id, title: row.title }]
+              : [],
+          );
+          if (active) {
+            setMerchantItems(normalized);
+            setMerchantId((current) => current || normalized[0]?.id || "");
+          }
+        }
+      } catch {
+        if (active) Alert.alert("Offres indisponibles", "Impossible de vérifier les offres. Réessayez plus tard.");
+      } finally {
+        if (active) setBillingConfigLoaded(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const selectOffer = async (nextOffer: Offer) => {
+    setOffer(nextOffer);
+  };
+
+  const choosePinPhoto = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) throw new Error("Autorisez l'accès à vos photos.");
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 1,
       });
-      setPinLocation(position.coords);
+      if (picked.canceled) return;
+      const selected = picked.assets[0];
+      if (!selected?.uri) throw new Error("La photo sélectionnée est indisponible.");
+      let uri = selected.uri;
+      let size = Number.POSITIVE_INFINITY;
+      for (const [width, quality] of [[1600, 0.72], [1280, 0.58], [1024, 0.45], [800, 0.32], [640, 0.22]]) {
+        const compressed = await ImageManipulator.manipulateAsync(
+          uri,
+          [{ resize: { width } }],
+          { compress: quality, format: ImageManipulator.SaveFormat.WEBP },
+        );
+        uri = compressed.uri;
+        size = new File(uri).size;
+        if (Number.isFinite(size) && size < MAX_PHOTO_BYTES) break;
+      }
+      if (!Number.isFinite(size) || size >= MAX_PHOTO_BYTES) {
+        throw new Error("La photo ne peut pas être compressée sous 300 Ko.");
+      }
+      setPinPhoto({ uri, size });
+      setUploadedPhotoId(null);
     } catch (error) {
-      Alert.alert(
-        "Position indisponible",
-        error instanceof Error
-          ? error.message
-          : "Impossible d'obtenir votre position GPS.",
-      );
+      Alert.alert("Photo indisponible", error instanceof Error ? error.message : "Impossible de sélectionner la photo.");
     }
   };
 
@@ -121,30 +199,75 @@ export default function CheckoutScreen() {
       }
       return;
     }
-    if (offer === "SPONSORED_PIN" && (!pinTitle.trim() || !pinLocation)) {
+    if (!billingConfigLoaded) {
+      Alert.alert("Offre indisponible", "La configuration des offres est en cours de vérification.");
+      return;
+    }
+    if (offer === "SPONSORED_PIN" && (!merchantId || !pinCaption.trim())) {
       Alert.alert(
         "Informations manquantes",
-        "Saisissez le nom de votre commerce et autorisez sa localisation.",
+        "Choisissez votre commerce et saisissez un texte de présentation.",
+      );
+      return;
+    }
+    if (
+      offer !== "SPONSORED_PIN" &&
+      (!publicationTitle.trim() || !publicationDescription.trim())
+    ) {
+      Alert.alert(
+        "Informations manquantes",
+        "Saisissez le nom de votre structure et une présentation courte.",
       );
       return;
     }
 
     setIsPaying(true);
     try {
+      let mediaPublicId = uploadedPhotoId;
+      if (offer === "SPONSORED_PIN" && pinPhoto && !mediaPublicId) {
+        mediaPublicId = await uploadMarketplaceImage(
+          pinPhoto.uri,
+          pinPhoto.size,
+          `sponsored-pin-${Date.now()}.webp`,
+        );
+        setUploadedPhotoId(mediaPublicId);
+      }
+      const pin = offer === "SPONSORED_PIN"
+        ? {
+            merchant_item_id: merchantId,
+            caption: pinCaption.trim(),
+            ...(mediaPublicId ? { media_public_id: mediaPublicId } : {}),
+          }
+        : undefined;
+      const publication = offer === "SPONSORED_PIN"
+        ? undefined
+        : {
+            title: publicationTitle.trim(),
+            description: publicationDescription.trim(),
+          };
+      if (!billingEnabled) {
+        const activation = await apiFetch(`${API_BASE_URL}/v1/pro/offers/activate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            payment_type: offer,
+            ...(pin ? { pin } : {}),
+            ...(publication ? { publication } : {}),
+          }),
+        });
+        if (!activation.ok) throw new Error(await readError(activation));
+        setOfferActivatedFree(true);
+        setIsPaid(true);
+        if (offer !== "SPONSORED_PIN") await refreshUser();
+        return;
+      }
       const response = await apiFetch(`${API_BASE_URL}/v1/payments/transactions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           payment_type: offer,
-          ...(offer === "SPONSORED_PIN"
-            ? {
-                pin: {
-                  title: pinTitle.trim(),
-                  latitude: pinLocation?.latitude,
-                  longitude: pinLocation?.longitude,
-                },
-              }
-            : {}),
+          ...(pin ? { pin } : {}),
+          ...(publication ? { publication } : {}),
         }),
       });
       if (!response.ok) throw new Error(await readError(response));
@@ -206,7 +329,9 @@ export default function CheckoutScreen() {
     return (
       <View style={styles.successScreen}>
         <CheckCircle2 color="#16a34a" size={58} />
-        <Text style={styles.successTitle}>Paiement confirmé</Text>
+        <Text style={styles.successTitle}>
+          {offerActivatedFree ? "Offre activée gratuitement" : "Paiement confirmé"}
+        </Text>
         <Text style={styles.subtitle}>
           {offer === "SPONSORED_PIN"
             ? "Votre épingle sponsorisée est visible sur la carte pour 7 jours."
@@ -243,6 +368,11 @@ export default function CheckoutScreen() {
       <Text style={styles.subtitle}>
         Activez votre présence professionnelle dans votre quartier.
       </Text>
+      {!billingEnabled && billingConfigLoaded && (
+        <View accessibilityRole="summary" style={styles.freeBanner}>
+          <Text style={styles.freeBannerText}>Gratuit pendant la phase de test</Text>
+        </View>
+      )}
 
       {OFFERS.map((item) => (
         <Pressable
@@ -265,24 +395,107 @@ export default function CheckoutScreen() {
         </Pressable>
       ))}
 
-      {offer === "SPONSORED_PIN" && (
+      {offer !== "SPONSORED_PIN" && (
         <View style={styles.pinForm}>
-          <Text style={styles.inputLabel}>Nom affiché sur la carte</Text>
-          <TextInput
-            accessibilityLabel="Nom affiché sur la carte"
-            maxLength={150}
-            onChangeText={setPinTitle}
-            placeholder="Ex. Boulangerie du quartier"
-            style={styles.input}
-            value={pinTitle}
-          />
-          <Text style={styles.locationHint}>
-            {pinLocation
-              ? `Position GPS : ${pinLocation.latitude.toFixed(4)}, ${pinLocation.longitude.toFixed(4)}`
-              : "La position GPS est nécessaire pour afficher l'épingle."}
+          <Text style={styles.inputLabel}>
+            {offer === "ALLIANCE_PRO" ? "Nom de votre commerce" : "Nom de votre structure"}
           </Text>
+          <TextInput
+            accessibilityLabel="Nom de votre structure"
+            maxLength={150}
+            onChangeText={setPublicationTitle}
+            placeholder="Nom"
+            style={styles.input}
+            value={publicationTitle}
+          />
+          <Text style={[styles.inputLabel, styles.formLabelSpacing]}>
+            Présentation courte (500 caractères maximum)
+          </Text>
+          <TextInput
+            accessibilityLabel="Présentation courte de l'offre"
+            maxLength={500}
+            multiline
+            onChangeText={setPublicationDescription}
+            placeholder="Présentez votre activité ou votre structure"
+            style={[styles.input, styles.multilineInput]}
+            value={publicationDescription}
+          />
         </View>
       )}
+
+      {offer === "SPONSORED_PIN" && (
+        <View style={styles.pinForm}>
+          <Text style={styles.inputLabel}>Choisir mon commerce</Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setMerchantPickerVisible(true)}
+            style={styles.input}
+          >
+            <Text style={styles.merchantName}>
+              {merchantItems.find(({ id }) => id === merchantId)?.title ??
+                "Sélectionner un commerce"}
+            </Text>
+          </Pressable>
+          {!merchantItems.length && (
+            <Text style={styles.locationHint}>
+              Publiez d'abord une annonce commerciale dans le Marché pour pouvoir la mettre en avant.
+            </Text>
+          )}
+          <Text style={styles.inputLabel}>Texte court (300 caractères maximum)</Text>
+          <TextInput
+            accessibilityLabel="Texte court de l'épingle sponsorisée"
+            maxLength={300}
+            onChangeText={setPinCaption}
+            placeholder="Présentez votre commerce en quelques mots"
+            style={styles.input}
+            value={pinCaption}
+          />
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void choosePinPhoto()}
+            style={styles.photoButton}
+          >
+            {pinPhoto ? (
+              <Image source={{ uri: pinPhoto.uri }} style={styles.pinPhoto} />
+            ) : (
+              <ImagePlus color="#2563eb" size={20} />
+            )}
+            <Text style={styles.locationHint}>{pinPhoto ? "Changer la photo" : "Ajouter une photo"}</Text>
+          </Pressable>
+          <Text style={styles.locationHint}>Durée : 7 jours</Text>
+        </View>
+      )}
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setMerchantPickerVisible(false)}
+        transparent
+        visible={merchantPickerVisible}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.merchantModal}>
+            <Text style={styles.inputLabel}>Mes commerces</Text>
+            {merchantItems.map((item) => (
+              <Pressable
+                key={item.id}
+                onPress={() => {
+                  setMerchantId(item.id);
+                  setMerchantPickerVisible(false);
+                }}
+                style={styles.merchantOption}
+              >
+                <Text style={styles.merchantName}>{item.title}</Text>
+              </Pressable>
+            ))}
+            {!merchantItems.length && (
+              <Text style={styles.locationHint}>Aucun commerce publié pour le moment.</Text>
+            )}
+            <Pressable onPress={() => setMerchantPickerVisible(false)} style={styles.closeMerchantModal}>
+              <Text style={styles.backText}>Fermer</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <Pressable
         accessibilityRole="button"
@@ -294,17 +507,20 @@ export default function CheckoutScreen() {
           <ActivityIndicator color="#ffffff" />
         ) : (
           <>
-            <CreditCard color="#ffffff" size={19} />
             <Text style={styles.primaryButtonText}>
-              Payer avec FedaPay (Mobile Money / Carte Visa)
+              {billingEnabled
+                ? "Payer avec FedaPay (Mobile Money / Carte Visa)"
+                : "Publier gratuitement"}
             </Text>
           </>
         )}
       </Pressable>
-      <Text style={styles.secureNote}>
-        Vous serez redirigé vers la page sécurisée de FedaPay. L'offre n'est activée
-        qu'après confirmation du paiement.
-      </Text>
+      {billingEnabled && (
+        <Text style={styles.secureNote}>
+          Vous serez redirigé vers la page sécurisée de FedaPay. L'offre n'est activée
+          qu'après confirmation du paiement.
+        </Text>
+      )}
     </ScrollView>
   );
 }
@@ -331,8 +547,12 @@ const styles = StyleSheet.create({
   offerTitle: { color: "#172b4d", fontSize: 16, fontWeight: "700" },
   offerDescription: { color: "#64748b", fontSize: 12, lineHeight: 18, marginTop: 4 },
   price: { color: "#1d4ed8", fontSize: 14, fontWeight: "700", marginTop: 9 },
+  freeBanner: { backgroundColor: "#dcfce7", borderColor: "#86efac", borderRadius: 9, borderWidth: 1, marginTop: 14, padding: 10 },
+  freeBannerText: { color: "#166534", fontSize: 13, fontWeight: "700", textAlign: "center" },
   pinForm: { marginTop: 18 },
   inputLabel: { color: "#334155", fontSize: 13, fontWeight: "600", marginBottom: 7 },
+  formLabelSpacing: { marginTop: 14 },
+  multilineInput: { minHeight: 92, paddingTop: 10, textAlignVertical: "top" },
   input: {
     backgroundColor: "#ffffff",
     borderColor: "#cbd5e1",
@@ -343,6 +563,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   locationHint: { color: "#64748b", fontSize: 12, marginTop: 8 },
+  photoButton: { alignItems: "center", backgroundColor: "#fff", borderColor: "#cbd5e1", borderRadius: 10, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 12, minHeight: 48, paddingHorizontal: 12 },
+  pinPhoto: { borderRadius: 6, height: 38, width: 48 },
+  modalBackdrop: { alignItems: "center", backgroundColor: "rgba(15,23,42,0.45)", flex: 1, justifyContent: "center", padding: 20 },
+  merchantModal: { backgroundColor: "#fff", borderRadius: 14, maxHeight: "75%", padding: 18, width: "100%" },
+  merchantOption: { borderBottomColor: "#e2e8f0", borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 13 },
+  merchantOptionSelected: { backgroundColor: "#eff6ff" },
+  merchantName: { color: "#172b4d", fontSize: 14, fontWeight: "600" },
+  closeMerchantModal: { alignItems: "center", paddingTop: 14 },
   primaryButton: {
     alignItems: "center",
     backgroundColor: "#2563eb",

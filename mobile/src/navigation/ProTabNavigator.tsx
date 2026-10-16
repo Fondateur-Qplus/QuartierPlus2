@@ -52,6 +52,7 @@ export default function ProTabNavigator() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [promoFreeAccess, setPromoFreeAccess] = useState(false);
+  const [billingDisabled, setBillingDisabled] = useState(false);
   const [promoPlan, setPromoPlan] = useState<PlanType>("ALLIANCE_PRO");
 
   useFocusEffect(
@@ -69,7 +70,9 @@ export default function ProTabNavigator() {
             throw new Error("La réponse de l'abonnement Pro est invalide.");
           }
           const activeSubscription = response.data.subscription;
+          if (!isActive) return;
           setPromoFreeAccess(response.data.promo_free_access === true);
+          setBillingDisabled(response.data.billing_enabled === false);
           if (activeSubscription === null) {
             if (!isActive) return;
             setSubscription(null);
@@ -148,11 +151,16 @@ export default function ProTabNavigator() {
 
   return (
     <View style={styles.dashboard}>
-      {promoFreeAccess && (
+      {(promoFreeAccess || billingDisabled) && (
         <>
           <View accessibilityRole="summary" style={styles.promoBanner}>
-            <Text style={styles.promoText}>{PROMO_FREE_ACCESS_BANNER}</Text>
+            <Text style={styles.promoText}>
+              {billingDisabled
+                ? "Gratuit pendant la phase de test"
+                : PROMO_FREE_ACCESS_BANNER}
+            </Text>
           </View>
+          {promoFreeAccess && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -183,6 +191,7 @@ export default function ProTabNavigator() {
               </Pressable>
             ))}
           </ScrollView>
+          )}
         </>
       )}
       <ProDashboardScreen subscription={displayedSubscription} />

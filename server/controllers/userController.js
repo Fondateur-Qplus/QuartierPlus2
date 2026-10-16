@@ -74,3 +74,65 @@ export const updateCurrentUser = async (request, response, next) => {
     return next(error);
   }
 };
+
+export const listMyMarketplaceItems = async (request, response, next) => {
+  const itemType =
+    typeof request.query.item_type === "string"
+      ? request.query.item_type
+      : null;
+  if (
+    itemType !== null &&
+    !["all", "products", "listing", "local", "service"].includes(itemType)
+  ) {
+    return response.status(400).json({ error: "Type d'annonce invalide." });
+  }
+  try {
+    const result = await pool.query(
+      `SELECT id, title, description, price_fcfa AS price,
+              price_fcfa = 0 AS is_free, category, item_type, created_at,
+              image_urls[1] AS image_url
+       FROM marketplace_items
+       WHERE seller_id = $1
+         AND (
+           $2::text IS NULL OR $2 = 'all' OR
+           ($2 = 'products' AND item_type IN ('listing', 'local')) OR
+           item_type = $2
+         )
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [request.auth.userId, itemType],
+    );
+    return response.status(200).json({ items: result.rows });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const listMyAlertsAndReports = async (request, response, next) => {
+  try {
+    const [alerts, reports] = await Promise.all([
+      pool.query(
+        `SELECT id, emergency_type, status, created_at
+         FROM sos_alerts
+         WHERE user_id = $1
+         ORDER BY created_at DESC
+         LIMIT 100`,
+        [request.auth.userId],
+      ),
+      pool.query(
+        `SELECT id, target_type, reason, status, created_at
+         FROM reports
+         WHERE reporter_id = $1
+         ORDER BY created_at DESC
+         LIMIT 100`,
+        [request.auth.userId],
+      ),
+    ]);
+    return response.status(200).json({
+      alerts: alerts.rows,
+      reports: reports.rows,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};

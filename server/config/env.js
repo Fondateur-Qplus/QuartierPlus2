@@ -27,6 +27,10 @@ const promoFreeAccessValue = optional("IS_PROMO_FREE_ACCESS");
 if (promoFreeAccessValue && !["true", "false"].includes(promoFreeAccessValue)) {
   throw new Error("IS_PROMO_FREE_ACCESS must be true or false.");
 }
+const billingEnabledValue = optional("BILLING_ENABLED");
+if (billingEnabledValue && !["true", "false"].includes(billingEnabledValue)) {
+  throw new Error("BILLING_ENABLED must be true or false.");
+}
 
 const databaseUrl = required("DATABASE_URL");
 let parsedDatabaseUrl;
@@ -91,23 +95,6 @@ if (isProduction && ticketQrSecret.length < 32) {
 const cloudinaryCloudName = optional("CLOUDINARY_CLOUD_NAME");
 const cloudinaryApiKey = optional("CLOUDINARY_API_KEY");
 const cloudinaryApiSecret = optional("CLOUDINARY_API_SECRET");
-const cloudinarySettings = [
-  ["CLOUDINARY_CLOUD_NAME", cloudinaryCloudName],
-  ["CLOUDINARY_API_KEY", cloudinaryApiKey],
-  ["CLOUDINARY_API_SECRET", cloudinaryApiSecret],
-];
-if (
-  cloudinarySettings.some(([, value]) => Boolean(value)) &&
-  cloudinarySettings.some(([, value]) => !value)
-) {
-  const missingVariables = cloudinarySettings
-    .filter(([, value]) => !value)
-    .map(([name]) => name);
-  throw new Error(
-    `Cloudinary configuration is incomplete. Missing variable(s): ${missingVariables.join(", ")}.`,
-  );
-}
-
 const positiveInteger = (name, fallback) => {
   const value = optional(name);
   if (!value) return fallback;
@@ -126,6 +113,19 @@ const isPlaceholderLiveKitValue = (value) =>
   /(?:your[-_]|replace[-_]?with|fake|placeholder|changeme|example(?:\.|$))/i.test(
     value,
   );
+const isValidLiveKitUrl = (value) => {
+  if (!value || isPlaceholderLiveKitValue(value)) return false;
+  try {
+    const parsed = new URL(value);
+    return (
+      ["wss:", "ws:"].includes(parsed.protocol) &&
+      Boolean(parsed.hostname) &&
+      (!isProduction || parsed.protocol === "wss:")
+    );
+  } catch {
+    return false;
+  }
+};
 const livekitConfigurationProblems = [
   !/^AP_[A-Za-z0-9_-]{8,}$/.test(livekitApiKey) ||
   isPlaceholderLiveKitValue(livekitApiKey)
@@ -134,7 +134,7 @@ const livekitConfigurationProblems = [
   livekitApiSecret.length < 32 || isPlaceholderLiveKitValue(livekitApiSecret)
     ? "LIVEKIT_API_SECRET"
     : null,
-  !livekitUrl || isPlaceholderLiveKitValue(livekitUrl)
+  !isValidLiveKitUrl(livekitUrl)
     ? "LIVEKIT_URL"
     : null,
 ].filter((name) => name !== null);
@@ -142,26 +142,6 @@ const livekitConfigurationIsUsable = livekitConfigurationProblems.length === 0;
 if (isProduction) {
   if (!googleClientId) {
     throw new Error("GOOGLE_CLIENT_ID is required in production.");
-  }
-  if (!livekitConfigurationIsUsable) {
-    throw new Error(
-      `Invalid or missing LiveKit configuration in production: ${livekitConfigurationProblems.join(", ")}.`,
-    );
-  }
-}
-if (livekitUrl) {
-  let parsedLivekitUrl;
-  try {
-    parsedLivekitUrl = new URL(livekitUrl);
-  } catch {
-    throw new Error("LIVEKIT_URL must be a valid WebSocket URL.");
-  }
-  if (
-    !["wss:", "ws:"].includes(parsedLivekitUrl.protocol) ||
-    !parsedLivekitUrl.hostname ||
-    (isProduction && parsedLivekitUrl.protocol !== "wss:")
-  ) {
-    throw new Error("LIVEKIT_URL must use WSS in production.");
   }
 }
 
@@ -208,6 +188,7 @@ export const env = Object.freeze({
   postMaxVideoBytes: positiveInteger("POST_MAX_VIDEO_BYTES", 30 * 1024 * 1024),
   postDailyLimit: positiveInteger("POST_DAILY_LIMIT", 10),
   isPromoFreeAccess: promoFreeAccessValue === "true",
+  billingEnabled: billingEnabledValue === "true",
   pgSsl: pgSslValue === "true",
   socketCorsOrigins: optional("SOCKET_CORS_ORIGIN")
     .split(",")

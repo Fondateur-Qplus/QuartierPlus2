@@ -134,3 +134,48 @@ test("marketplace accepts a free WebP listing with a French category and descrip
   assert.equal(response.statusCode, 201);
   assert.equal(response.payload.item.is_free, true);
 });
+
+test("Made in publication requires and stores its country of origin", async (context) => {
+  let receivedValues;
+  context.mock.method(pool, "query", async (statement, values) => {
+    assert.match(statement, /country_of_origin/);
+    receivedValues = values;
+    return {
+      rowCount: 1,
+      rows: [{
+        id: "2b490a29-02dd-44ad-8c9f-81d9cadc0003",
+        title: "Panier local",
+        description: "Fabriqué ici",
+        price: 0,
+        is_free: true,
+        category: "Alimentation",
+        item_type: "local",
+        country_of_origin: "BF",
+      }],
+    };
+  });
+  const response = createResponse();
+  await createMarketplaceItem(
+    {
+      auth: { userId: USER_ID },
+      body: {
+        title: "Panier local",
+        description: "Fabriqué ici",
+        category: "Alimentation",
+        item_type: "local",
+        is_free: true,
+        price: 0,
+        currency: "FCFA",
+        country_code: "BF",
+        country_of_origin: "bf",
+        location: { latitude: 12.345, longitude: -1.234 },
+      },
+    },
+    response,
+    (error) => {
+      throw error;
+    },
+  );
+  assert.equal(response.statusCode, 201);
+  assert.equal(receivedValues[10], "BF");
+});

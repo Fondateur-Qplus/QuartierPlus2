@@ -9,6 +9,10 @@ process.env.DOTENV_CONFIG_PATH = "/dev/null";
 const { listNearbyAlerts, listPublicMarketplace } = await import(
   "../controllers/publicController.js"
 );
+const {
+  getMediaStatus,
+  getPublicConfig,
+} = await import("../controllers/publicController.js");
 const { pool } = await import("../db/pool.js");
 
 const createResponse = () => ({
@@ -113,6 +117,25 @@ test("country scope filters marketplace posts by country without coordinates", a
 test("neighborhood scope rejects missing position and country code", async (context) => {
   context.mock.method(pool, "query", async () => {
     throw new Error("Invalid scopes must not query the database.");
+  });
+
+  test("public configuration reports billing state without private configuration", () => {
+    const response = createResponse();
+    getPublicConfig({}, response);
+    assert.deepEqual(response.payload, { billingEnabled: false });
+  });
+
+  test("media status reports configuration names only", () => {
+    const response = createResponse();
+    getMediaStatus({}, response);
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(
+      Object.keys(response.payload).sort(),
+      ["cloudinaryConfigured", "livekitConfigured", "missing"].sort(),
+    );
+    assert.equal(Array.isArray(response.payload.missing), true);
+    assert.equal(JSON.stringify(response.payload).includes("secret"), false);
+    assert.equal(JSON.stringify(response.payload).includes("apiKey"), false);
   });
   const response = createResponse();
 

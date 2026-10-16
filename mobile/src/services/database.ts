@@ -47,6 +47,10 @@ const schema = `
     payload TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS app_preferences (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );
 `;
 
 const profileSchema = `
@@ -59,10 +63,6 @@ const profileSchema = `
     name TEXT NOT NULL,
     phone TEXT NOT NULL,
     position INTEGER NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS profile.app_preferences (
-    key TEXT PRIMARY KEY NOT NULL,
-    value TEXT NOT NULL
   );
 `;
 
