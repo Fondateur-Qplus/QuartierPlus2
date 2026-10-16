@@ -31,6 +31,7 @@ import {
 } from "react-native";
 import { io } from "socket.io-client";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 import { cacheMessages, getCachedMessages } from "../services/db";
 import {
   API_BASE_URL,
@@ -191,6 +192,7 @@ const normalizeConversation = (value: unknown): PrivateConversation | null => {
 };
 
 export default function MessagesScreen() {
+  const { colors, t } = useTheme();
   const route = useRoute<RouteProp<MainTabParamList, "Messages">>();
   const { isOffline, requestAuthentication, token, user } = useAuth();
   const [activeTab, setActiveTab] = useState<"Privés" | "Canaux">("Privés");
@@ -911,12 +913,12 @@ export default function MessagesScreen() {
   const ChannelIcon = selectedChannel.icon;
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
         <View style={styles.headerIcon}>
-          <MessageSquare color="#2563eb" size={22} />
+          <MessageSquare color={colors.primary} size={22} />
         </View>
-        <Text style={styles.title}>Messages</Text>
+        <Text style={[styles.title, { color: colors.text }]}>{t("tabMessages")}</Text>
       </View>
 
       <View style={styles.tabs}>
@@ -930,7 +932,7 @@ export default function MessagesScreen() {
           style={[styles.tab, activeTab === "Privés" && styles.tabSelected]}
         >
           <MessageSquare
-            color={activeTab === "Privés" ? "#2563eb" : "#64748b"}
+            color={activeTab === "Privés" ? colors.primary : colors.secondaryText}
             size={17}
           />
           <Text
@@ -939,7 +941,7 @@ export default function MessagesScreen() {
               activeTab === "Privés" && styles.tabTextSelected,
             ]}
           >
-            Privés
+            {t("messagesPrivate")}
           </Text>
         </Pressable>
         <Pressable
@@ -952,7 +954,7 @@ export default function MessagesScreen() {
           style={[styles.tab, activeTab === "Canaux" && styles.tabSelected]}
         >
           <Radio
-            color={activeTab === "Canaux" ? "#2563eb" : "#64748b"}
+            color={activeTab === "Canaux" ? colors.primary : colors.secondaryText}
             size={17}
           />
           <Text
@@ -961,7 +963,7 @@ export default function MessagesScreen() {
               activeTab === "Canaux" && styles.tabTextSelected,
             ]}
           >
-            Canaux
+            {t("messagesChannels")}
           </Text>
         </Pressable>
       </View>
@@ -978,6 +980,10 @@ export default function MessagesScreen() {
         {CHANNELS.map((channel) => {
           const Icon = channel.icon;
           const isSelected = selectedChannelId === channel.id;
+          const channelLabel =
+            channel.id === "emergency"
+              ? t("messagesEmergency")
+              : t("messagesAnnouncements");
           return (
             <Pressable
               accessibilityRole="tab"
@@ -989,14 +995,14 @@ export default function MessagesScreen() {
                 isSelected && styles.channelButtonSelected,
               ]}
             >
-              <Icon color={channel.color} size={17} />
+              <Icon color={isSelected ? colors.primary : colors.secondaryText} size={17} />
               <Text
                 style={[
                   styles.channelButtonText,
                   isSelected && styles.channelButtonTextSelected,
                 ]}
               >
-                {channel.label}
+                {channelLabel}
               </Text>
             </Pressable>
           );
@@ -1008,7 +1014,11 @@ export default function MessagesScreen() {
           <ChannelIcon color={selectedChannel.color} size={20} />
         </View>
         <View style={styles.channelCopy}>
-          <Text style={styles.channelName}>{selectedChannel.label}</Text>
+          <Text style={[styles.channelName, { color: colors.text }]}>
+            {selectedChannelId === "emergency"
+              ? t("messagesEmergency")
+              : t("messagesAnnouncements")}
+          </Text>
           <Text style={styles.channelDescription}>
             {selectedChannel.description}
           </Text>
@@ -1037,7 +1047,7 @@ export default function MessagesScreen() {
             <X color="#475569" size={20} />
           </Pressable>
           <View style={styles.participantAvatar}>
-            <Text style={styles.participantInitial}>
+            <Text style={[styles.participantInitial, { color: colors.primary }]}>
               {selectedConversation.participantName
                 .split(/\s+/)
                 .map((part) => part[0])
@@ -1088,7 +1098,7 @@ export default function MessagesScreen() {
                     setDraftMessage("");
                     setSelectedConversation(conversation);
                   }}
-                  style={styles.conversationCard}
+                  style={[styles.conversationCard, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
                   <View
                     style={[
@@ -1108,21 +1118,21 @@ export default function MessagesScreen() {
                   </View>
                   <View style={styles.conversationCopy}>
                     <View style={styles.conversationTopLine}>
-                      <Text style={styles.conversationName}>
+                      <Text style={[styles.conversationName, { color: colors.text }]}>
                         {conversation.participantName}
                       </Text>
-                      <Text style={styles.timestamp}>
+                      <Text style={[styles.timestamp, { color: colors.secondaryText }]}>
                         {formatMessageTime(conversation.updatedAt)}
                       </Text>
                     </View>
                     <View style={styles.conversationBottomLine}>
-                      <Text numberOfLines={1} style={styles.lastMessage}>
+                      <Text numberOfLines={1} style={[styles.lastMessage, { color: colors.secondaryText }]}>
                         {conversation.lastMessage ||
                           (conversation.participantType === "seller"
                             ? "Discussion avec le vendeur"
                             : "Discussion avec votre voisin")}
                       </Text>
-                      <Text style={styles.participantType}>
+                      <Text style={[styles.participantType, { color: colors.secondaryText }]}>
                         {conversation.participantType === "seller"
                           ? "VENDEUR"
                           : "VOISIN"}

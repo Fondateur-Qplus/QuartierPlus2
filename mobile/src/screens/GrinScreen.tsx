@@ -32,6 +32,7 @@ import {
   View,
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 import { API_BASE_URL, apiFetch, getStoredAuthToken } from "../services/api";
 import { enterGrinPictureInPicture } from "../services/grinPictureInPicture";
 
@@ -100,6 +101,7 @@ const requestAndroidAvPermissions = async () => {
 
 export default function GrinScreen() {
   const { isOffline } = useAuth();
+  const { colors } = useTheme();
   const { width } = useWindowDimensions();
   const roomRef = useRef<Room | null>(null);
   const connectionRef = useRef<Promise<Room> | null>(null);
@@ -351,30 +353,30 @@ export default function GrinScreen() {
   const isCompact = width < 360;
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
         <View style={styles.logo}>
-          <Users color="#7c3aed" size={23} />
+          <Users color={colors.primary} size={23} />
         </View>
         <View style={styles.headerText}>
-          <Text style={styles.title}>Grin du quartier</Text>
-          <Text style={styles.subtitle}>Rencontre vidéo en direct</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Grin du quartier</Text>
+          <Text style={[styles.subtitle, { color: colors.secondaryText }]}>Rencontre vidéo en direct</Text>
         </View>
         <View style={[styles.connectionBadge, isConnected && styles.connectedBadge]}>
           {isConnected ? (
             <Wifi color="#15803d" size={16} />
           ) : (
-            <WifiOff color="#64748b" size={16} />
+            <WifiOff color={colors.secondaryText} size={16} />
           )}
         </View>
       </View>
 
       {!isCompact && (
-        <View style={styles.roomCard}>
-          <Radio color="#7c3aed" size={18} />
+        <View style={[styles.roomCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Radio color={colors.primary} size={18} />
           <View style={styles.roomCopy}>
-            <Text style={styles.roomTitle}>Salon du quartier</Text>
-            <Text style={styles.roomSubtitle}>
+            <Text style={[styles.roomTitle, { color: colors.text }]}>Salon du quartier</Text>
+            <Text style={[styles.roomSubtitle, { color: colors.secondaryText }]}>
               {isConnecting
                 ? "Connexion au salon..."
                 : `${chairs.length}/${MAX_CHAIRS} chaises occupées`}
@@ -384,7 +386,7 @@ export default function GrinScreen() {
             <ActivityIndicator color="#7c3aed" />
           ) : (
             <View style={styles.seatCount}>
-              <Users color="#6d28d9" size={15} />
+              <Users color={colors.primary} size={15} />
               <Text style={styles.seatCountText}>
                 {chairs.length}/{MAX_CHAIRS}
               </Text>
@@ -469,30 +471,40 @@ export default function GrinScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={isCameraEnabled ? "Désactiver la caméra" : "Activer la caméra"}
                 onPress={() => void toggleCamera()}
-                style={[styles.controlButton, isCameraEnabled && styles.controlActive]}
+                style={[
+                  styles.controlButton,
+                  { backgroundColor: colors.card },
+                  isCameraEnabled && styles.controlActive,
+                  isCameraEnabled && { backgroundColor: colors.primary },
+                ]}
               >
                 {isCameraEnabled ? (
                   <Camera color="#ffffff" size={21} />
                 ) : (
-                  <CameraOff color="#334155" size={21} />
+                  <CameraOff color={colors.secondaryText} size={21} />
                 )}
               </Pressable>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={isMicrophoneEnabled ? "Couper le microphone" : "Activer le microphone"}
                 onPress={() => void toggleMicrophone()}
-                style={[styles.controlButton, isMicrophoneEnabled && styles.controlActive]}
+                style={[
+                  styles.controlButton,
+                  { backgroundColor: colors.card },
+                  isMicrophoneEnabled && styles.controlActive,
+                  isMicrophoneEnabled && { backgroundColor: colors.primary },
+                ]}
               >
                 {isMicrophoneEnabled ? (
                   <Mic color="#ffffff" size={21} />
                 ) : (
-                  <MicOff color="#334155" size={21} />
+                  <MicOff color={colors.secondaryText} size={21} />
                 )}
               </Pressable>
               <Pressable
                 accessibilityRole="button"
                 onPress={() => void leaveChair()}
-                style={[styles.joinButton, styles.leaveButton]}
+                style={[styles.joinButton, styles.leaveButton, { backgroundColor: colors.danger }]}
               >
                 <Text style={styles.joinButtonText}>Quitter le Grin</Text>
               </Pressable>
@@ -504,6 +516,7 @@ export default function GrinScreen() {
               onPress={() => void joinChair()}
               style={[
                 styles.joinButton,
+                { backgroundColor: colors.primary },
                 (!isConnected || chairs.length >= MAX_CHAIRS) &&
                   styles.disabledButton,
               ]}
@@ -526,14 +539,14 @@ export default function GrinScreen() {
               (!isConnected || selectedPipIdentity === null) && styles.disabledPip,
             ]}
           >
-            <PictureInPicture2 color="#334155" size={21} />
+            <PictureInPicture2 color={colors.secondaryText} size={21} />
           </Pressable>
         </View>
       </ScrollView>
 
       {error && (
-        <View style={styles.errorCard}>
-          <Text accessibilityRole="alert" style={styles.errorText}>
+        <View style={[styles.errorCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text accessibilityRole="alert" style={[styles.errorText, { color: colors.danger }]}>
             {error}
           </Text>
           {!isOffline && !isConnected && (

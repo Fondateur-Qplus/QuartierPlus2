@@ -35,6 +35,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { File, Paths } from "expo-file-system";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 import { API_BASE_URL, apiFetch } from "../services/api";
 import { uploadMarketplaceImage } from "../services/uploadMarketplaceImage";
 import { MediaUploadError } from "../services/mediaUploadError";
@@ -221,6 +222,7 @@ const normalizeSearchText = (text: string) =>
 
 export default function MarketplaceScreen() {
   const route = useRoute<RouteProp<MainTabParamList, "Marche">>();
+  const { colors, t } = useTheme();
   const {
     authStatus,
     isOffline,
@@ -847,7 +849,7 @@ export default function MarketplaceScreen() {
   };
 
   const renderItemCard = (item: MarketplaceItem) => (
-    <View key={item.id} style={styles.listingCard}>
+    <View key={item.id} style={[styles.listingCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <View style={styles.listingImage}>
         {item.imageUrl ? (
           <Image
@@ -860,11 +862,11 @@ export default function MarketplaceScreen() {
         )}
       </View>
       <View style={styles.listingBody}>
-        <Text numberOfLines={2} style={styles.listingName}>{item.name}</Text>
+        <Text numberOfLines={2} style={[styles.listingName, { color: colors.text }]}>{item.name}</Text>
         <Text style={styles.listingPrice}>{formatPrice(item)}</Text>
         <View style={styles.locationRow}>
-          <MapPin color="#64748b" size={13} />
-          <Text numberOfLines={1} style={styles.locationText}>
+          <MapPin color={colors.secondaryText} size={13} />
+          <Text numberOfLines={1} style={[styles.locationText, { color: colors.secondaryText }]}>
             {item.location || "À proximité"}
           </Text>
         </View>
@@ -901,23 +903,23 @@ export default function MarketplaceScreen() {
   );
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl
             onRefresh={refreshItems}
             refreshing={isRefreshing}
-            tintColor="#2563eb"
+            tintColor={colors.primary}
           />
         }
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
           <View style={styles.headerIcon}>
-            <ShoppingBag color="#2563eb" size={22} />
+            <ShoppingBag color={colors.primary} size={22} />
           </View>
-          <Text style={styles.title}>Marché du Quartier</Text>
+          <Text style={[styles.title, { color: colors.text }]}>{t("marketTitle")}</Text>
         </View>
 
         <ScrollView
@@ -938,7 +940,11 @@ export default function MarketplaceScreen() {
                 <Text
                   style={[styles.tabText, isSelected && styles.tabTextSelected]}
                 >
-                  {tab}
+                  {tab === "Annonces"
+                    ? t("marketListings")
+                    : tab === "Local / Made in"
+                      ? t("marketLocal")
+                      : t("marketServices")}
                 </Text>
               </Pressable>
             );
@@ -1013,13 +1019,13 @@ export default function MarketplaceScreen() {
         )}
 
         {activeTab === "Annonces" && (
-          <View style={styles.section}>
+          <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.searchBar}>
               <Search color="#94a3b8" size={19} />
               <VoiceTextInput
                 accessibilityLabel="Rechercher un article"
                 onChangeText={setSearchText}
-                placeholder="Rechercher un article..."
+                placeholder={`${t("search")}...`}
                 placeholderTextColor="#94a3b8"
                 returnKeyType="search"
                 style={styles.searchInput}
@@ -1068,7 +1074,7 @@ export default function MarketplaceScreen() {
         )}
 
         {activeTab === "Local / Made in" && (
-          <View style={styles.section}>
+          <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.localBanner}>
               <View style={styles.flagIcon}>
                 <Flag color="#15803d" size={23} />
@@ -1100,7 +1106,7 @@ export default function MarketplaceScreen() {
         )}
 
         {activeTab === "Services & Métiers" && (
-          <View style={styles.section}>
+          <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.servicesInfo}>
               <View style={styles.servicesIcon}>
                 <Wrench color="#2563eb" size={23} />
@@ -1366,7 +1372,7 @@ export default function MarketplaceScreen() {
                 {isPublishing ? (
                   <ActivityIndicator color="#ffffff" />
                 ) : (
-                  <Text style={styles.publishButtonText}>Publier</Text>
+                  <Text style={styles.publishButtonText}>{t("publish")}</Text>
                 )}
               </Pressable>
             </ScrollView>

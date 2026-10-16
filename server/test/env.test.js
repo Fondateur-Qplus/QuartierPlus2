@@ -38,6 +38,40 @@ test("production environment accepts a complete valid configuration", () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
+test("Cloudinary and LiveKit values are trimmed and unquoted", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      "import { env } from './config/env.js'; console.log(JSON.stringify([env.cloudinaryCloudName, env.cloudinaryApiKey, env.cloudinaryApiSecret, env.livekitApiKey, env.livekitApiSecret, env.livekitUrl]))",
+    ],
+    {
+      cwd: serverDirectory,
+      env: {
+        ...productionEnv,
+        CLOUDINARY_CLOUD_NAME: '  "quartierplus"  ',
+        CLOUDINARY_API_KEY: " 'cloud-key' ",
+        CLOUDINARY_API_SECRET: '"cloud-secret"',
+        LIVEKIT_API_KEY: ' "AP_testUnitKey12345" ',
+        LIVEKIT_API_SECRET: ` "${productionEnv.LIVEKIT_API_SECRET}" `,
+        LIVEKIT_URL: ' "wss://quartierplus.livekit.cloud" ',
+        DOTENV_CONFIG_PATH: "/dev/null",
+      },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), [
+    "quartierplus",
+    "cloud-key",
+    "cloud-secret",
+    "AP_testUnitKey12345",
+    productionEnv.LIVEKIT_API_SECRET,
+    "wss://quartierplus.livekit.cloud",
+  ]);
+});
+
 test("production environment rejects missing required service credentials", () => {
   for (const name of ["SMS_DELIVERY_TOKEN", "GOOGLE_CLIENT_ID"]) {
     const result = loadProductionConfig({ [name]: "" });

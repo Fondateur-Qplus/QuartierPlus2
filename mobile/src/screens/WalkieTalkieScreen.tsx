@@ -1,4 +1,5 @@
 import { AudioSession } from "@livekit/react-native";
+import { requestRecordingPermissionsAsync } from "expo-audio";
 import { Mic, Radio, Wifi, WifiOff } from "lucide-react-native";
 import { Room, RoomEvent, type Participant } from "livekit-client";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -11,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 import { API_BASE_URL, apiFetch } from "../services/api";
 
 type ActiveSpeaker = {
@@ -19,7 +21,7 @@ type ActiveSpeaker = {
 };
 
 const TALKIE_WALKIE_UNAVAILABLE =
-  "Service vidéo/voix en cours d'activation";
+  "Service indisponible";
 
 const speakerLabel = (participant: Participant): ActiveSpeaker => ({
   identity: participant.identity,
@@ -28,6 +30,7 @@ const speakerLabel = (participant: Participant): ActiveSpeaker => ({
 
 export default function WalkieTalkieScreen() {
   const { isOffline } = useAuth();
+  const { colors } = useTheme();
   const roomRef = useRef<Room | null>(null);
   const connectPromiseRef = useRef<Promise<Room> | null>(null);
   const pressedRef = useRef(false);
@@ -133,14 +136,24 @@ export default function WalkieTalkieScreen() {
 
   const startTalking = async () => {
     pressedRef.current = true;
+    setError("Connexion au canal…");
     try {
+      const permission = await requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        throw new Error("L’accès au microphone est nécessaire pour parler.");
+      }
       const room = await connect();
       if (!pressedRef.current) return;
       await room.localParticipant.setMicrophoneEnabled(true);
       if (pressedRef.current) setIsTalking(true);
     } catch (talkError) {
       pressedRef.current = false;
-      setError(TALKIE_WALKIE_UNAVAILABLE);
+      setError(
+        talkError instanceof Error &&
+          talkError.message.startsWith("L’accès au microphone")
+          ? talkError.message
+          : TALKIE_WALKIE_UNAVAILABLE,
+      );
     }
   };
 
@@ -160,75 +173,75 @@ export default function WalkieTalkieScreen() {
   };
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
-        <View style={styles.logo}>
-          <Radio color="#dc2626" size={23} />
+        <View style={[styles.logo, { backgroundColor: colors.muted }]}>
+          <Radio color={colors.danger} size={23} />
         </View>
         <View style={styles.headerText}>
-          <Text style={styles.title}>Talkie-walkie</Text>
-          <Text style={styles.subtitle}>Canal vocal URGENCES</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Talkie-walkie</Text>
+          <Text style={[styles.subtitle, { color: colors.secondaryText }]}>Canal vocal URGENCES</Text>
         </View>
-        <View style={[styles.connectionBadge, isConnected ? styles.connectedBadge : null]}>
+        <View style={[styles.connectionBadge, { backgroundColor: colors.muted }, isConnected ? styles.connectedBadge : null]}>
           {isConnected ? (
             <Wifi color="#15803d" size={16} />
           ) : (
-            <WifiOff color="#64748b" size={16} />
+            <WifiOff color={colors.secondaryText} size={16} />
           )}
         </View>
       </View>
 
-      <View style={styles.channelCard}>
+      <View style={[styles.channelCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={styles.liveDot} />
         <View style={styles.channelInfo}>
-          <Text style={styles.channelName}>URGENCES</Text>
-          <Text style={styles.channelDetails}>
+          <Text style={[styles.channelName, { color: colors.text }]}>URGENCES</Text>
+          <Text style={[styles.channelDetails, { color: colors.secondaryText }]}>
             {isConnecting
-              ? "Connexion à la room sécurisée..."
+              ? "Connexion au canal…"
               : isConnected
                 ? "Audio en direct · micro fermé"
                 : "Non connecté"}
           </Text>
         </View>
-        {isConnecting && <ActivityIndicator color="#dc2626" />}
+        {isConnecting && <ActivityIndicator color={colors.danger} />}
       </View>
 
       <View style={styles.talkArea}>
-        <View style={[styles.ripple, isTalking && styles.rippleActive]}>
+        <View style={[styles.ripple, { backgroundColor: colors.muted }, isTalking && styles.rippleActive]}>
           <Pressable
             accessibilityLabel={
               isTalking ? "Relâcher pour arrêter de parler" : "Maintenir pour parler"
             }
             accessibilityRole="button"
-            disabled={!isConnected && !isConnecting}
             onPressIn={() => void startTalking()}
             onPressOut={stopTalking}
             style={[
               styles.talkButton,
+              { backgroundColor: colors.danger },
               isTalking && styles.talkButtonActive,
               !isConnected && styles.talkButtonDisabled,
             ]}
           >
-            <Mic color="#ffffff" size={38} />
+            <Mic color={colors.onPrimary} size={38} />
             <Text style={styles.talkButtonText}>
               {isTalking ? "PARLEZ" : "MAINTENIR"}
             </Text>
           </Pressable>
         </View>
-        <Text style={styles.instruction}>
+        <Text style={[styles.instruction, { color: colors.secondaryText }]}>
           Appuyez et maintenez pour parler. Relâchez pour écouter.
         </Text>
       </View>
 
-      <View style={styles.speakersCard}>
-        <Text style={styles.speakersTitle}>Personnes qui parlent</Text>
+      <View style={[styles.speakersCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.speakersTitle, { color: colors.text }]}>Personnes qui parlent</Text>
         <ScrollView contentContainerStyle={styles.speakersList}>
           {isTalking && (
             <View style={styles.speakerRow}>
               <View style={[styles.speakerAvatar, styles.localAvatar]}>
                 <Mic color="#ffffff" size={15} />
               </View>
-              <Text style={styles.speakerName}>Vous</Text>
+              <Text style={[styles.speakerName, { color: colors.text }]}>Vous</Text>
               <View style={styles.speakingIndicator}>
                 <View style={styles.speakingBar} />
                 <View style={[styles.speakingBar, styles.speakingBarTall]} />
@@ -241,11 +254,11 @@ export default function WalkieTalkieScreen() {
             .map((speaker) => (
               <View key={speaker.identity} style={styles.speakerRow}>
                 <View style={styles.speakerAvatar}>
-                  <Text style={styles.speakerInitial}>
+                  <Text style={[styles.speakerInitial, { color: colors.primary }]}>
                     {speaker.name.slice(0, 1).toUpperCase()}
                   </Text>
                 </View>
-                <Text style={styles.speakerName}>{speaker.name}</Text>
+                <Text style={[styles.speakerName, { color: colors.text }]}>{speaker.name}</Text>
                 <View style={[styles.speakingIndicator, styles.remoteSpeakingIndicator]}>
                   <View style={styles.speakingBar} />
                   <View style={[styles.speakingBar, styles.speakingBarTall]} />
@@ -254,17 +267,17 @@ export default function WalkieTalkieScreen() {
               </View>
             ))}
           {!isTalking && speakers.length === 0 && (
-            <Text style={styles.emptySpeakers}>Personne ne parle pour le moment.</Text>
+            <Text style={[styles.emptySpeakers, { color: colors.secondaryText }]}>Personne ne parle pour le moment.</Text>
           )}
         </ScrollView>
       </View>
 
       {error && (
-        <View style={styles.errorCard}>
-          <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text>
+        <View style={[styles.errorCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text accessibilityRole="alert" style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
           {!isOffline && (
             <Pressable accessibilityRole="button" onPress={retryConnection}>
-              <Text style={styles.retryText}>Réessayer</Text>
+              <Text style={[styles.retryText, { color: colors.primary }]}>Réessayer</Text>
             </Pressable>
           )}
         </View>

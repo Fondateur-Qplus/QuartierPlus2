@@ -9,7 +9,7 @@ const COUNTRY_KEY = "quartierplus.profile.active-country";
 const CONTACTS_KEY = "quartierplus.profile.trusted-contacts";
 const PREFERENCES_KEY = "quartierplus.profile.preferences";
 const DEFAULT_PREFERENCES: AppPreferences = {
-  theme: "light",
+  theme: "system",
   language: "fr",
   sosNotificationsEnabled: true,
   defaultRadiusKm: 3,
@@ -60,7 +60,10 @@ export const openProfileStore = async (): Promise<ProfileStore> => ({
     if (!saved) return DEFAULT_PREFERENCES;
     const value = JSON.parse(saved) as Partial<AppPreferences>;
     return {
-      theme: value.theme === "dark" ? "dark" : "light",
+      theme:
+        value.theme === "dark" || value.theme === "system"
+          ? value.theme
+          : "light",
       language: value.language === "en" ? "en" : "fr",
       sosNotificationsEnabled: value.sosNotificationsEnabled !== false,
       defaultRadiusKm:

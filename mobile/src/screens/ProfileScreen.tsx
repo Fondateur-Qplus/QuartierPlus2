@@ -29,7 +29,6 @@ import {
 } from "../storage/profileStore";
 import {
   ActivityIndicator,
-  Appearance,
   Alert,
   Linking,
   Modal,
@@ -42,6 +41,7 @@ import {
   View,
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 import VoiceTextInput from "../components/VoiceTextInput";
 import { useVoiceAssistant } from "../context/VoiceAssistantContext";
 import {
@@ -128,6 +128,7 @@ const PLUS_DESTINATIONS = [
 export default function ProfileScreen() {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { isOffline, requestAuthentication, signOut, user } = useAuth();
+  const { colors, language, setLanguage, setTheme, t, theme } = useTheme();
   const { setFloatingButtonEnabled } = useVoiceAssistant();
   const [selectedCountry, setSelectedCountry] = useState<Country>(COUNTRIES[3]);
   const [countryMenuOpen, setCountryMenuOpen] = useState(false);
@@ -135,9 +136,10 @@ export default function ProfileScreen() {
   const [databaseReady, setDatabaseReady] = useState(false);
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const databaseRef = useRef<ProfileStore | null>(null);
+  const preferencesChangedRef = useRef(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [preferences, setPreferences] = useState<AppPreferences>({
-    theme: "light",
+    theme: "system",
     language: "fr",
     sosNotificationsEnabled: true,
     defaultRadiusKm: 3,
@@ -190,8 +192,11 @@ export default function ProfileScreen() {
         if (!isMounted) return;
         databaseRef.current = database;
         setContacts(savedContacts);
-        setPreferences(savedPreferences);
-        Appearance.setColorScheme(savedPreferences.theme);
+        if (!preferencesChangedRef.current) {
+          setPreferences(savedPreferences);
+          setTheme(savedPreferences.theme);
+          setLanguage(savedPreferences.language);
+        }
         setSosNotificationsEnabled(savedPreferences.sosNotificationsEnabled);
         setDefaultRadius(`${savedPreferences.defaultRadiusKm} km`);
         if (savedCountry) {
@@ -217,7 +222,7 @@ export default function ProfileScreen() {
     return () => {
       isMounted = false;
     };
-  }, [isOffline]);
+  }, [isOffline, setLanguage, setTheme]);
 
   useEffect(() => {
     let isMounted = true;
@@ -484,6 +489,10 @@ export default function ProfileScreen() {
   };
 
   const updatePreferences = async (next: AppPreferences) => {
+    preferencesChangedRef.current = true;
+    setTheme(next.theme);
+    setLanguage(next.language);
+    setPreferences(next);
     const database = databaseRef.current;
     if (!database) {
       Alert.alert(
@@ -494,8 +503,6 @@ export default function ProfileScreen() {
     }
     try {
       await database.setPreferences(next);
-      Appearance.setColorScheme(next.theme);
-      setPreferences(next);
       setSosNotificationsEnabled(next.sosNotificationsEnabled);
       setDefaultRadius(`${next.defaultRadiusKm} km`);
       setFloatingButtonEnabled(next.voiceAssistantFloatingButton);
@@ -623,7 +630,7 @@ export default function ProfileScreen() {
 
   if (!user) {
     return (
-      <View style={styles.screen}>
+      <View style={[styles.screen, { backgroundColor: colors.background }]}>
         <ScrollView contentContainerStyle={styles.guestContent}>
           <Text style={styles.guestEyebrow}>VOTRE ESPACE</Text>
           <Text accessibilityRole="header" style={styles.guestTitle}>Profil</Text>
@@ -765,7 +772,7 @@ export default function ProfileScreen() {
   }
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
@@ -866,7 +873,7 @@ export default function ProfileScreen() {
                 onPress={() => openPlusDestination(screen)}
                 style={styles.guestLinkRow}
               >
-                <Text style={styles.menuLabel}>{label}</Text>
+                <Text style={[styles.menuLabel, { color: colors.text }]}>{label}</Text>
                 <ChevronRight color="#64748b" size={18} />
               </Pressable>
             ))}
@@ -969,10 +976,10 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
             Numéros d'Urgence Officiels du Pays
           </Text>
-          <Text style={styles.countryContext}>
+          <Text style={[styles.countryContext, { color: colors.secondaryText }]}>
             Numéros pour {selectedCountry.name}
           </Text>
           {EMERGENCY_SERVICES.map((service) => {
@@ -1006,14 +1013,14 @@ export default function ProfileScreen() {
 
         <View style={styles.section}>
           <View style={styles.sectionHeadingRow}>
-            <Text style={styles.sectionTitle}>Mes Contacts SOS Personnels</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>{t("profileEmergencyContacts")}</Text>
             <Text style={styles.priorityCaption}>Prioritaires</Text>
           </View>
-          <Text style={styles.sectionDescription}>
+          <Text style={[styles.sectionDescription, { color: colors.secondaryText }]}>
             Ces proches reçoivent un signalement lorsque vous déclenchez SOS.
           </Text>
           {contacts.length === 0 && (
-            <Text style={styles.emptyContacts}>
+            <Text style={[styles.emptyContacts, { color: colors.secondaryText }]}>
               Aucun contact de confiance enregistré.
             </Text>
           )}
@@ -1068,8 +1075,8 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Mes Activités</Text>
-          <View style={styles.settingsCard}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{t("profileActivities")}</Text>
+          <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {ACTIVITIES.map((activity, index) => {
               const ActivityIcon = activity.icon;
               return (
@@ -1083,7 +1090,7 @@ export default function ProfileScreen() {
                   ]}
                 >
                   <ActivityIcon color="#2563eb" size={19} />
-                  <Text style={styles.menuLabel}>{activity.label}</Text>
+                  <Text style={[styles.menuLabel, { color: colors.text }]}>{activity.label}</Text>
                   <ChevronRight color="#94a3b8" size={18} />
                 </Pressable>
               );
@@ -1092,13 +1099,13 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Assistant vocal</Text>
-          <View style={styles.settingsCard}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{t("profileVoiceAssistant")}</Text>
+          <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.menuRow}>
               <Mic color="#2563eb" size={19} />
               <View style={styles.notificationCopy}>
-                <Text style={styles.menuLabel}>Afficher le bouton flottant</Text>
-                <Text style={styles.settingDescription}>
+                <Text style={[styles.menuLabel, { color: colors.text }]}>Afficher le bouton flottant</Text>
+                <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
                   Ajouter un raccourci à l’écran
                 </Text>
               </View>
@@ -1123,23 +1130,23 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Confidentialité & Paramètres</Text>
-          <View style={styles.settingsCard}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{t("profileSettings")}</Text>
+          <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Pressable
               accessibilityRole="button"
               onPress={updateRadius}
               style={[styles.menuRow, styles.menuRowBorder]}
             >
               <MapPin color="#2563eb" size={19} />
-              <Text style={styles.menuLabel}>Rayon GPS par défaut</Text>
+              <Text style={[styles.menuLabel, { color: colors.text }]}>Rayon GPS par défaut</Text>
               <Text style={styles.settingValue}>{defaultRadius}</Text>
               <ChevronRight color="#94a3b8" size={18} />
             </Pressable>
             <View style={[styles.menuRow, styles.menuRowBorder]}>
               <Bell color="#2563eb" size={19} />
               <View style={styles.notificationCopy}>
-                <Text style={styles.menuLabel}>Notifications SOS</Text>
-                <Text style={styles.settingDescription}>
+                <Text style={[styles.menuLabel, { color: colors.text }]}>Notifications SOS</Text>
+                <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
                   Alertes de sécurité prioritaires
                 </Text>
               </View>
@@ -1156,47 +1163,83 @@ export default function ProfileScreen() {
                 value={sosNotificationsEnabled}
               />
             </View>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() =>
-                void updatePreferences({
-                  ...preferences,
-                  theme: preferences.theme === "light" ? "dark" : "light",
-                })
-              }
-              style={[styles.menuRow, styles.menuRowBorder]}
-            >
-              <Settings color="#2563eb" size={19} />
-              <Text style={styles.menuLabel}>Thème de l'application</Text>
-              <Text style={styles.settingValue}>
-                {preferences.theme === "light" ? "Clair" : "Sombre"}
-              </Text>
-              <ChevronRight color="#94a3b8" size={18} />
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() =>
-                void updatePreferences({
-                  ...preferences,
-                  language: preferences.language === "fr" ? "en" : "fr",
-                })
-              }
-              style={[styles.menuRow, styles.menuRowBorder]}
-            >
-              <Globe color="#2563eb" size={19} />
-              <Text style={styles.menuLabel}>Langue</Text>
-              <Text style={styles.settingValue}>
-                {preferences.language === "fr" ? "Français" : "English"}
-              </Text>
-              <ChevronRight color="#94a3b8" size={18} />
-            </Pressable>
+            <View style={[styles.preferenceGroup, styles.menuRowBorder]}>
+              <View style={styles.preferenceHeading}>
+                <Settings color={colors.primary} size={19} />
+                <Text style={[styles.menuLabel, { color: colors.text }]}>{t("themeTitle")}</Text>
+              </View>
+              <View style={styles.preferenceChoices}>
+                {(["light", "dark", "system"] as const).map((choice) => (
+                  <Pressable
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: theme === choice }}
+                    key={choice}
+                    onPress={() =>
+                      void updatePreferences({ ...preferences, theme: choice })
+                    }
+                    style={[
+                      styles.preferenceChoice,
+                      theme === choice && styles.preferenceChoiceSelected,
+                      theme === choice && { backgroundColor: colors.primary },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.preferenceChoiceText,
+                        theme === choice && styles.preferenceChoiceTextSelected,
+                        theme === choice && { color: colors.onPrimary },
+                      ]}
+                    >
+                      {choice === "light"
+                        ? t("themeLight")
+                        : choice === "dark"
+                          ? t("themeDark")
+                          : t("themeSystem")}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+            <View style={styles.preferenceGroup}>
+              <View style={styles.preferenceHeading}>
+                <Globe color={colors.primary} size={19} />
+                <Text style={[styles.menuLabel, { color: colors.text }]}>{t("languageTitle")}</Text>
+              </View>
+              <View style={styles.preferenceChoices}>
+                {(["fr", "en"] as const).map((choice) => (
+                  <Pressable
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: language === choice }}
+                    key={choice}
+                    onPress={() =>
+                      void updatePreferences({ ...preferences, language: choice })
+                    }
+                    style={[
+                      styles.preferenceChoice,
+                      language === choice && styles.preferenceChoiceSelected,
+                      language === choice && { backgroundColor: colors.primary },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.preferenceChoiceText,
+                        language === choice && styles.preferenceChoiceTextSelected,
+                        language === choice && { color: colors.onPrimary },
+                      ]}
+                    >
+                      {choice === "fr" ? t("languageFrench") : t("languageEnglish")}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
             <Pressable
               accessibilityRole="button"
               onPress={() => setPrivacyVisible(true)}
               style={styles.menuRow}
             >
               <Lock color="#2563eb" size={19} />
-              <Text style={styles.menuLabel}>Confidentialité du compte</Text>
+              <Text style={[styles.menuLabel, { color: colors.text }]}>Confidentialité du compte</Text>
               <ChevronRight color="#94a3b8" size={18} />
             </Pressable>
           </View>
@@ -1206,7 +1249,7 @@ export default function ProfileScreen() {
             style={styles.logoutButton}
           >
             <LogOut color="#dc2626" size={19} />
-            <Text style={styles.logoutText}>Déconnexion</Text>
+            <Text style={styles.logoutText}>{t("profileLogout")}</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
@@ -1214,7 +1257,7 @@ export default function ProfileScreen() {
             style={styles.menuRow}
           >
             <Info color="#2563eb" size={19} />
-            <Text style={styles.menuLabel}>À propos</Text>
+            <Text style={[styles.menuLabel, { color: colors.text }]}>{t("profileAbout")}</Text>
             <ChevronRight color="#94a3b8" size={18} />
           </Pressable>
         </View>
@@ -1231,16 +1274,16 @@ export default function ProfileScreen() {
         visible={privacyVisible}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text accessibilityRole="header" style={styles.modalTitle}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text accessibilityRole="header" style={[styles.modalTitle, { color: colors.text }]}>
               Confidentialité
             </Text>
-            <Text style={styles.settingDescription}>
+            <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
               Vos préférences restent enregistrées sur cet appareil. Les réglages
               de notifications SOS et de localisation peuvent être modifiés ici.
             </Text>
             <View style={styles.privacySetting}>
-              <Text style={styles.menuLabel}>Notifications SOS</Text>
+              <Text style={[styles.menuLabel, { color: colors.text }]}>Notifications SOS</Text>
               <Switch
                 accessibilityLabel="Notifications SOS"
                 onValueChange={(enabled) =>
@@ -1269,15 +1312,15 @@ export default function ProfileScreen() {
         visible={aboutVisible}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>À propos de QuartierPlus</Text>
-            <Text style={styles.settingDescription}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>À propos de QuartierPlus</Text>
+            <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
               Update ID : {Updates.updateId ?? "Version intégrée à l’APK"}
             </Text>
-            <Text style={styles.settingDescription}>
+            <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
               Commit du serveur : {serverHealth?.commit ?? "indisponible"}
             </Text>
-            <Text style={styles.settingDescription}>
+            <Text style={[styles.settingDescription, { color: colors.secondaryText }]}>
               Hôte API : {API_BASE_URL ? new URL(API_BASE_URL).host : "non configuré"}
             </Text>
             <Pressable
@@ -1953,6 +1996,40 @@ const styles = StyleSheet.create({
     marginTop: 11,
     overflow: "hidden",
     paddingHorizontal: 12,
+  },
+  preferenceGroup: {
+    paddingVertical: 10,
+  },
+  preferenceHeading: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 34,
+  },
+  preferenceChoices: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 7,
+  },
+  preferenceChoice: {
+    alignItems: "center",
+    backgroundColor: "#f1f5f9",
+    borderRadius: 7,
+    flex: 1,
+    justifyContent: "center",
+    minHeight: 34,
+    paddingHorizontal: 6,
+  },
+  preferenceChoiceSelected: {
+    backgroundColor: "#2563eb",
+  },
+  preferenceChoiceText: {
+    color: "#475569",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  preferenceChoiceTextSelected: {
+    color: "#ffffff",
   },
   menuRow: {
     alignItems: "center",

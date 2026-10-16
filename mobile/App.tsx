@@ -27,6 +27,7 @@ import {
 import * as SecureStore from "expo-secure-store";
 import VoiceAssistantModal from "./src/components/VoiceAssistantModal";
 import { AuthProvider, useAuth } from "./src/context/AuthContext";
+import { useTheme, ThemeProvider } from "./src/context/ThemeContext";
 import {
   VoiceAssistantProvider,
   useVoiceAssistant,
@@ -78,17 +79,18 @@ const renderTabLabel =
 
 function MainTabs() {
   const insets = useSafeAreaInsets();
+  const { colors, t } = useTheme();
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: "#2563eb",
-        tabBarInactiveTintColor: "#64748b",
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.secondaryText,
         tabBarStyle: {
           flexDirection: "row",
           width: "100%",
-          backgroundColor: "#ffffff",
-          borderTopColor: "#e2e8f0",
+          backgroundColor: colors.card,
+          borderTopColor: colors.border,
           justifyContent: "space-around",
           height: 64 + insets.bottom,
           paddingBottom: Math.max(insets.bottom, 4),
@@ -101,7 +103,7 @@ function MainTabs() {
         name="Accueil"
         component={FeedScreen}
         options={{
-          tabBarLabel: renderTabLabel("Accueil"),
+          tabBarLabel: renderTabLabel(t("tabHome")),
           tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
         }}
       />
@@ -109,7 +111,7 @@ function MainTabs() {
         name="CarteSOS"
         component={MapScreen}
         options={{
-          tabBarLabel: renderTabLabel("Carte"),
+          tabBarLabel: renderTabLabel(t("tabMap")),
           tabBarIcon: ({ color, size }) => <MapPin color={color} size={size} />,
         }}
       />
@@ -117,7 +119,7 @@ function MainTabs() {
         name="Marche"
         component={MarketplaceScreen}
         options={{
-          tabBarLabel: renderTabLabel("Marché"),
+          tabBarLabel: renderTabLabel(t("tabMarket")),
           tabBarIcon: ({ color, size }) => <ShoppingBag color={color} size={size} />,
         }}
       />
@@ -125,7 +127,7 @@ function MainTabs() {
         name="Messages"
         component={MessagesScreen}
         options={{
-          tabBarLabel: renderTabLabel("Messages"),
+          tabBarLabel: renderTabLabel(t("tabMessages")),
           tabBarIcon: ({ color, size }) => (
             <MessageSquare color={color} size={size} />
           ),
@@ -135,7 +137,7 @@ function MainTabs() {
         name="Profil"
         component={SettingsScreen}
         options={{
-          tabBarLabel: renderTabLabel("Profil"),
+          tabBarLabel: renderTabLabel(t("tabProfile")),
           tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
         }}
       />
@@ -177,6 +179,7 @@ function MainTabs() {
 
 function RootNavigator() {
   const { user, isSessionLoading } = useAuth();
+  const { colors } = useTheme();
   const [introductionSeen, setIntroductionSeen] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -195,9 +198,9 @@ function RootNavigator() {
 
   if (isSessionLoading || introductionSeen === null) {
     return (
-      <View style={styles.loading}>
-        <StatusBar style="dark" />
-        <ActivityIndicator color="#2563eb" size="large" />
+      <View style={[styles.loading, { backgroundColor: colors.background }]}>
+        <StatusBar style={colors.text === "#f8fafc" ? "light" : "dark"} />
+        <ActivityIndicator color={colors.primary} size="large" />
       </View>
     );
   }
@@ -233,6 +236,7 @@ function VoiceAssistantLayer({ currentRoute }: { currentRoute: string }) {
     isFloatingButtonEnabled,
     requestAssistant,
   } = useVoiceAssistant();
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   useEffect(() => {
@@ -318,7 +322,7 @@ function VoiceAssistantLayer({ currentRoute }: { currentRoute: string }) {
           onPress={requestAssistant}
           style={[styles.voiceButton, { bottom: insets.bottom + assistantBottom }]}
         >
-          <Mic color="#ffffff" size={23} />
+          <Mic color={colors.onPrimary} size={23} />
         </Pressable>
       )}
       <VoiceAssistantModal onNavigate={navigate} />
@@ -328,6 +332,7 @@ function VoiceAssistantLayer({ currentRoute }: { currentRoute: string }) {
 
 function AppNavigation() {
   const { clearActiveInput } = useVoiceAssistant();
+  const { colors } = useTheme();
   const [currentRoute, setCurrentRoute] = useState("Welcome");
   const [serverUpdating, setServerUpdating] = useState(isServerUpdating);
   useEffect(() => {
@@ -338,7 +343,7 @@ function AppNavigation() {
     return unsubscribe;
   }, []);
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ backgroundColor: colors.background, flex: 1 }}>
       {serverUpdating && (
         <Text accessibilityRole="alert" style={styles.serverUpdating}>
           Le serveur est en cours de mise à jour
@@ -362,6 +367,7 @@ function AppNavigation() {
 
 function AuthPromptLayer() {
   const { authPromptVisible, dismissAuthPrompt } = useAuth();
+  const { colors } = useTheme();
   const openAuth = (mode: "login" | "register") => {
     dismissAuthPrompt();
     navigationRef.navigate("PhoneAuth", { mode });
@@ -374,23 +380,23 @@ function AuthPromptLayer() {
       visible={authPromptVisible}
     >
       <View style={styles.promptBackdrop}>
-        <View style={styles.promptSheet}>
+        <View style={[styles.promptSheet, { backgroundColor: colors.card }]}>
           <Pressable
             accessibilityLabel="Fermer"
             accessibilityRole="button"
             onPress={dismissAuthPrompt}
             style={styles.promptClose}
           >
-            <X color="#53605a" size={20} />
+            <X color={colors.secondaryText} size={20} />
           </Pressable>
           <View style={styles.promptIcon}><LockKeyhole color="#b9382f" size={23} /></View>
-          <Text accessibilityRole="header" style={styles.promptTitle}>Connectez-vous pour continuer</Text>
-          <Text style={styles.promptCopy}>Créez un compte ou connectez-vous pour accéder à cette action.</Text>
-          <Pressable accessibilityRole="button" onPress={() => openAuth("login")} style={styles.promptPrimary}>
+          <Text accessibilityRole="header" style={[styles.promptTitle, { color: colors.text }]}>Connectez-vous pour continuer</Text>
+          <Text style={[styles.promptCopy, { color: colors.secondaryText }]}>Créez un compte ou connectez-vous pour accéder à cette action.</Text>
+          <Pressable accessibilityRole="button" onPress={() => openAuth("login")} style={[styles.promptPrimary, { backgroundColor: colors.primary }]}>
             <Text style={styles.promptPrimaryText}>Se connecter</Text>
           </Pressable>
           <Pressable accessibilityRole="button" onPress={() => openAuth("register")} style={styles.promptSecondary}>
-            <Text style={styles.promptSecondaryText}>Créer un compte</Text>
+            <Text style={[styles.promptSecondaryText, { color: colors.text }]}>Créer un compte</Text>
           </Pressable>
         </View>
       </View>
@@ -457,11 +463,13 @@ const styles = StyleSheet.create({
 export default function App() {
   return (
     <OfflineQueryProvider>
-      <AuthProvider>
-        <VoiceAssistantProvider>
-          <AppNavigation />
-        </VoiceAssistantProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <VoiceAssistantProvider>
+            <AppNavigation />
+          </VoiceAssistantProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </OfflineQueryProvider>
   );
 }

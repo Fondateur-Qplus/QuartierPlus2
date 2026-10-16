@@ -7,6 +7,8 @@ if (!["development", "test", "production"].includes(nodeEnv)) {
 const isProduction = nodeEnv === "production";
 
 const optional = (name) => process.env[name]?.trim() ?? "";
+const optionalUnquoted = (name) =>
+  optional(name).replace(/^(['"])(.*)\1$/, "$2").trim();
 
 const required = (name) => {
   const value = optional(name);
@@ -92,9 +94,9 @@ if (isProduction && ticketQrSecret.length < 32) {
   );
 }
 
-const cloudinaryCloudName = optional("CLOUDINARY_CLOUD_NAME");
-const cloudinaryApiKey = optional("CLOUDINARY_API_KEY");
-const cloudinaryApiSecret = optional("CLOUDINARY_API_SECRET");
+const cloudinaryCloudName = optionalUnquoted("CLOUDINARY_CLOUD_NAME");
+const cloudinaryApiKey = optionalUnquoted("CLOUDINARY_API_KEY");
+const cloudinaryApiSecret = optionalUnquoted("CLOUDINARY_API_SECRET");
 const positiveInteger = (name, fallback) => {
   const value = optional(name);
   if (!value) return fallback;
@@ -106,9 +108,9 @@ const positiveInteger = (name, fallback) => {
 };
 
 const googleClientId = optional("GOOGLE_CLIENT_ID");
-const livekitApiKey = optional("LIVEKIT_API_KEY");
-const livekitApiSecret = optional("LIVEKIT_API_SECRET");
-const livekitUrl = optional("LIVEKIT_URL");
+const livekitApiKey = optionalUnquoted("LIVEKIT_API_KEY");
+const livekitApiSecret = optionalUnquoted("LIVEKIT_API_SECRET");
+const livekitUrl = optionalUnquoted("LIVEKIT_URL");
 const isPlaceholderLiveKitValue = (value) =>
   /(?:your[-_]|replace[-_]?with|fake|placeholder|changeme|example(?:\.|$))/i.test(
     value,

@@ -29,6 +29,7 @@ import {
 } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 import { useVoiceAssistant } from "../context/VoiceAssistantContext";
 import {
   cacheAlerts,
@@ -196,6 +197,7 @@ const formatDate = (date: string) => {
 };
 
 export default function FeedScreen() {
+  const { colors } = useTheme();
   const { authStatus, isOffline, requestAuthentication, user } = useAuth();
   const { requestAssistant } = useVoiceAssistant();
   const { width: pageWidth } = useWindowDimensions();
@@ -898,7 +900,7 @@ export default function FeedScreen() {
   };
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
         <View>
           <Text style={styles.eyebrow}>QUARTIERPLUS</Text>

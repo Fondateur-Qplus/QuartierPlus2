@@ -24,6 +24,7 @@ import {
 import type { Socket } from "socket.io-client";
 import { openProfileStore } from "../storage/profileStore";
 import { uploadEmergencyMedia } from "../services/uploadEmergencyMedia";
+import { useTheme } from "../context/ThemeContext";
 
 export type SosCoordinates = {
   latitude: number;
@@ -73,6 +74,7 @@ export default function SosButton({
   onAlert,
   openRequestId,
 }: SosButtonProps) {
+  const { colors } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
   const [emergencyType, setEmergencyType] = useState<EmergencyType | null>(null);
   const [escalationLevel, setEscalationLevel] = useState(1);
@@ -582,11 +584,11 @@ export default function SosButton({
         visible={isOpen}
       >
         <View style={styles.backdrop}>
-          <View style={styles.dialog}>
+          <View style={[styles.dialog, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.header}>
               <View>
-                <Text style={styles.title}>Alerte d'urgence</Text>
-                <Text style={styles.subtitle}>
+                <Text style={[styles.title, { color: colors.text }]}>Alerte d'urgence</Text>
+                <Text style={[styles.subtitle, { color: colors.secondaryText }]}>
                   {countdown === null
                     ? "Choisissez le type d'aide nécessaire."
                     : "Envoi imminent — annulez si vous avez déclenché par erreur."}
@@ -775,9 +777,9 @@ export default function SosButton({
         visible={trackingAlert !== null}
       >
         <View style={styles.backdrop}>
-          <View style={styles.dialog}>
-            <Text style={styles.title}>Suivi de votre alerte SOS</Text>
-            <Text style={styles.subtitle}>
+          <View style={[styles.dialog, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.title, { color: colors.text }]}>Suivi de votre alerte SOS</Text>
+            <Text style={[styles.subtitle, { color: colors.secondaryText }]}>
               {trackingAlert?.relaysNotified
                 ? `${trackingAlert.relaysNotified} relais prévenu(s). Les réponses arrivent au fur et à mesure.`
                 : "Alerte transmise aux relais proches. Leurs réponses arrivent au fur et à mesure."}

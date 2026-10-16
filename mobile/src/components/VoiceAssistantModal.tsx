@@ -15,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 import { useVoiceAssistant } from "../context/VoiceAssistantContext";
 import { callOfficialEmergencyService } from "../services/emergencyServices";
 import { openProfileStore } from "../storage/profileStore";
@@ -52,6 +53,7 @@ type VoiceAssistantModalProps = {
 export default function VoiceAssistantModal({
   onNavigate,
 }: VoiceAssistantModalProps) {
+  const { colors } = useTheme();
   const { isOffline, user } = useAuth();
   const {
     clearActiveInput,
@@ -540,11 +542,11 @@ export default function VoiceAssistantModal({
         visible={isVisible}
       >
         <View style={styles.backdrop}>
-          <View accessibilityViewIsModal style={styles.dialog}>
+          <View accessibilityViewIsModal style={[styles.dialog, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {permissionExplanationVisible ? (
               <>
-                <Text style={styles.title}>Avant d’activer le microphone</Text>
-                <Text style={styles.confirmationText}>
+                <Text style={[styles.title, { color: colors.text }]}>Avant d’activer le microphone</Text>
+                <Text style={[styles.confirmationText, { color: colors.secondaryText }]}>
                   QuartierPlus utilise la reconnaissance vocale du téléphone
                   uniquement après votre action. L’application ne stocke pas
                   l’audio et ne l’envoie pas à QuartierPlus. L’accès au
@@ -572,8 +574,8 @@ export default function VoiceAssistantModal({
               <>
             <View style={styles.header}>
               <View style={styles.titleGroup}>
-                <Text style={styles.title}>Assistant vocal</Text>
-                <Text style={styles.subtitle}>
+                <Text style={[styles.title, { color: colors.text }]}>Assistant vocal</Text>
+                <Text style={[styles.subtitle, { color: colors.secondaryText }]}>
                   Dictez dans un champ ou donnez une commande
                 </Text>
               </View>

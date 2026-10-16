@@ -56,6 +56,7 @@ import MapView, {
 import { io, type Socket } from "socket.io-client";
 import SosButton from "../components/SosButton";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 import { API_BASE_URL, apiFetch, getStoredAuthToken } from "../services/api";
 import type { MainTabParamList } from "../navigation/types";
 
@@ -349,6 +350,7 @@ const createRegion = (center: Coordinates, radiusMeters: ScopeMeters): Region =>
 };
 
 export default function MapScreen() {
+  const { colors } = useTheme();
   const route = useRoute<RouteProp<MainTabParamList, "CarteSOS">>();
   const { authStatus, requestAuthentication, token, isOffline, queueOfflineAction } = useAuth();
 
@@ -1280,7 +1282,7 @@ export default function MapScreen() {
   };
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
       {userLocation && initialRegion ? (
         <MapView
           initialRegion={initialRegion}

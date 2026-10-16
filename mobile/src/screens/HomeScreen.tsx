@@ -34,6 +34,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import type { MainTabParamList } from "../navigation/types";
 import VoiceTextInput from "../components/VoiceTextInput";
+import { useTheme } from "../context/ThemeContext";
 
 type Scope = "quartier" | "pays" | "monde";
 type ActiveModal = "comments" | "share" | "live" | "assistant" | null;
@@ -57,6 +58,7 @@ const ASSISTANT_SUGGESTIONS = [
 ];
 
 export default function HomeScreen() {
+  const { colors } = useTheme();
   const navigation =
     useNavigation<BottomTabNavigationProp<MainTabParamList>>();
   const [scope, setScope] = useState<Scope>("quartier");
@@ -197,7 +199,7 @@ export default function HomeScreen() {
       : String(likeCount);
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <View style={styles.videoBackdrop}>
         <View style={styles.backdropGlow} />
         <View style={styles.sun} />

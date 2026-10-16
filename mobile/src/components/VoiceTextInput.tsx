@@ -8,8 +8,10 @@ import {
 } from "react-native";
 import { Mic } from "lucide-react-native";
 import { useVoiceAssistant } from "../context/VoiceAssistantContext";
+import { useTheme } from "../context/ThemeContext";
 
 export default function VoiceTextInput(props: TextInputProps) {
+  const { colors } = useTheme();
   const {
     recognitionAvailable,
     registerInput,
@@ -80,7 +82,8 @@ export default function VoiceTextInput(props: TextInputProps) {
         {...props}
         onChangeText={handleChangeText}
         onFocus={handleFocus}
-        style={[textStyle, styles.input]}
+        placeholderTextColor={props.placeholderTextColor ?? colors.secondaryText}
+        style={[textStyle, styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
         value={isControlled ? props.value : uncontrolledValue}
       />
       {recognitionAvailable ? (
@@ -90,7 +93,7 @@ export default function VoiceTextInput(props: TextInputProps) {
           onPress={requestDictation}
           style={styles.dictationButton}
         >
-          <Mic color="#2563eb" size={18} />
+          <Mic color={colors.primary} size={18} />
         </Pressable>
       ) : null}
     </View>

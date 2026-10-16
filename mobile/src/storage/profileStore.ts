@@ -21,7 +21,7 @@ export type StoredCountry = {
 };
 
 export type AppPreferences = {
-  theme: "light" | "dark";
+  theme: "light" | "dark" | "system";
   language: "fr" | "en";
   sosNotificationsEnabled: boolean;
   defaultRadiusKm: 3 | 10 | 30;
@@ -247,7 +247,7 @@ export const openProfileStore = async (): Promise<ProfileStore> => {
 };
 
 const defaultPreferences = (): AppPreferences => ({
-  theme: "light",
+  theme: "system",
   language: "fr",
   sosNotificationsEnabled: true,
   defaultRadiusKm: 3,
@@ -261,7 +261,10 @@ const normalizePreferences = (value: unknown): AppPreferences => {
   const preferences = value as Partial<AppPreferences>;
   const radius = Number(preferences.defaultRadiusKm);
   return {
-    theme: preferences.theme === "dark" ? "dark" : "light",
+    theme:
+      preferences.theme === "dark" || preferences.theme === "system"
+        ? preferences.theme
+        : "light",
     language: preferences.language === "en" ? "en" : "fr",
     sosNotificationsEnabled: preferences.sosNotificationsEnabled !== false,
     defaultRadiusKm: radius === 10 || radius === 30 ? radius : 3,
