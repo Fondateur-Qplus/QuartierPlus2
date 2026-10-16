@@ -92,13 +92,19 @@ const cloudinaryCloudName = optional("CLOUDINARY_CLOUD_NAME");
 const cloudinaryApiKey = optional("CLOUDINARY_API_KEY");
 const cloudinaryApiSecret = optional("CLOUDINARY_API_SECRET");
 const cloudinarySettings = [
-  cloudinaryCloudName,
-  cloudinaryApiKey,
-  cloudinaryApiSecret,
+  ["CLOUDINARY_CLOUD_NAME", cloudinaryCloudName],
+  ["CLOUDINARY_API_KEY", cloudinaryApiKey],
+  ["CLOUDINARY_API_SECRET", cloudinaryApiSecret],
 ];
-if (cloudinarySettings.some(Boolean) && !cloudinarySettings.every(Boolean)) {
+if (
+  cloudinarySettings.some(([, value]) => Boolean(value)) &&
+  cloudinarySettings.some(([, value]) => !value)
+) {
+  const missingVariables = cloudinarySettings
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
   throw new Error(
-    "CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET must be configured together.",
+    `Cloudinary configuration is incomplete. Missing variable(s): ${missingVariables.join(", ")}.`,
   );
 }
 
@@ -116,13 +122,30 @@ const googleClientId = optional("GOOGLE_CLIENT_ID");
 const livekitApiKey = optional("LIVEKIT_API_KEY");
 const livekitApiSecret = optional("LIVEKIT_API_SECRET");
 const livekitUrl = optional("LIVEKIT_URL");
+const isPlaceholderLiveKitValue = (value) =>
+  /(?:your[-_]|replace[-_]?with|fake|placeholder|changeme|example(?:\.|$))/i.test(
+    value,
+  );
+const livekitConfigurationProblems = [
+  !/^AP_[A-Za-z0-9_-]{8,}$/.test(livekitApiKey) ||
+  isPlaceholderLiveKitValue(livekitApiKey)
+    ? "LIVEKIT_API_KEY"
+    : null,
+  livekitApiSecret.length < 32 || isPlaceholderLiveKitValue(livekitApiSecret)
+    ? "LIVEKIT_API_SECRET"
+    : null,
+  !livekitUrl || isPlaceholderLiveKitValue(livekitUrl)
+    ? "LIVEKIT_URL"
+    : null,
+].filter((name) => name !== null);
+const livekitConfigurationIsUsable = livekitConfigurationProblems.length === 0;
 if (isProduction) {
   if (!googleClientId) {
     throw new Error("GOOGLE_CLIENT_ID is required in production.");
   }
-  if (!livekitApiKey || !livekitApiSecret || !livekitUrl) {
+  if (!livekitConfigurationIsUsable) {
     throw new Error(
-      "LIVEKIT_API_KEY, LIVEKIT_API_SECRET, and LIVEKIT_URL are required in production.",
+      `Invalid or missing LiveKit configuration in production: ${livekitConfigurationProblems.join(", ")}.`,
     );
   }
 }
@@ -170,6 +193,8 @@ export const env = Object.freeze({
   livekitApiKey,
   livekitApiSecret,
   livekitUrl,
+  livekitConfigurationIsUsable,
+  livekitConfigurationProblems,
   fedapaySecretKey: optional("FEDAPAY_SECRET_KEY"),
   fedapayPublicKey: optional("FEDAPAY_PUBLIC_KEY"),
   fedapayEnvironment,

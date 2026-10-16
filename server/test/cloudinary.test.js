@@ -10,9 +10,11 @@ process.env.CLOUDINARY_API_KEY = "test-api-key";
 process.env.CLOUDINARY_API_SECRET = "test-api-secret";
 process.env.DOTENV_CONFIG_PATH = "/dev/null";
 
-const { createCloudinaryUploadSignature, hasGpsMetadata } = await import(
-  "../services/cloudinary.js"
-);
+const {
+  createCloudinaryUploadSignature,
+  getCloudinaryAsset,
+  hasGpsMetadata,
+} = await import("../services/cloudinary.js");
 
 test("Cloudinary upload signatures sort params and never return the secret", () => {
   const parameters = {
@@ -56,4 +58,35 @@ test("GPS EXIF metadata is detected for post-upload deletion", () => {
     true,
   );
   assert.equal(hasGpsMetadata({ Make: "Camera", Orientation: 1 }), false);
+});
+
+test("Cloudinary refusals are logged and returned with their exact reason", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
+  const loggedErrors = [];
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ error: { message: "Invalid API key" } }), {
+      status: 401,
+    });
+  console.error = (...args) => loggedErrors.push(args);
+
+  try {
+    await assert.rejects(
+      getCloudinaryAsset("image", "user-123_asset"),
+      (error) => {
+        assert.equal(error.status, 502);
+        assert.match(error.message, /HTTP 401.*Invalid API key/);
+        return true;
+      },
+    );
+    assert.deepEqual(loggedErrors, [
+      [
+        "Cloudinary API refused a media request:",
+        { status: 401, message: "Invalid API key" },
+      ],
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
+  }
 });

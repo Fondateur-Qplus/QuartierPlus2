@@ -15,9 +15,10 @@ const productionEnv = {
   SMS_DELIVERY_URL: "https://sms.example.invalid/send",
   SMS_DELIVERY_TOKEN: "fake-sms-token",
   GOOGLE_CLIENT_ID: "fake-google-client-id",
-  LIVEKIT_API_KEY: "fake-livekit-key",
-  LIVEKIT_API_SECRET: "fake-livekit-secret",
-  LIVEKIT_URL: "wss://livekit.example.invalid",
+  LIVEKIT_API_KEY: "AP_testUnitKey12345",
+  LIVEKIT_API_SECRET:
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  LIVEKIT_URL: "wss://quartierplus.livekit.cloud",
   DOTENV_CONFIG_PATH: "/dev/null",
 };
 
@@ -74,12 +75,21 @@ test("production environment rejects malformed URLs and boolean variables", () =
   }
 });
 
+test("production environment rejects placeholder LiveKit credentials", () => {
+  const result = loadProductionConfig({
+    LIVEKIT_API_KEY: "your-livekit-api-key",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /LIVEKIT_API_KEY/);
+  assert.match(result.stderr, /Invalid or missing LiveKit configuration/);
+});
+
 test("production environment requires Cloudinary credentials as a complete set", () => {
   const result = loadProductionConfig({
     CLOUDINARY_CLOUD_NAME: "quartierplus",
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /CLOUDINARY_API_KEY/);
+  assert.match(result.stderr, /Missing variable\(s\): CLOUDINARY_API_KEY/);
 });
 
 test("media limits are configurable positive integers", () => {

@@ -6,10 +6,10 @@ process.env.NODE_ENV = "test";
 process.env.DATABASE_URL ??= "postgres://localhost/quartierplus_test";
 process.env.JWT_SECRET ??=
   "unit-test-secret-that-is-longer-than-thirty-two-characters";
-process.env.LIVEKIT_API_KEY = "test-api-key";
+process.env.LIVEKIT_API_KEY = "AP_testUnitKey12345";
 process.env.LIVEKIT_API_SECRET =
-  "test-livekit-secret-that-is-long-enough-for-signing";
-process.env.LIVEKIT_URL = "wss://livekit.example.test";
+  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+process.env.LIVEKIT_URL = "wss://quartierplus.livekit.cloud";
 
 const { createLiveKitToken } = await import(
   "../controllers/livekitController.js"

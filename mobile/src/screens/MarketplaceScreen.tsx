@@ -39,6 +39,7 @@ import { uploadMarketplaceImage } from "../services/uploadMarketplaceImage";
 import { MediaUploadError } from "../services/mediaUploadError";
 import type { MainTabParamList } from "../navigation/types";
 import VoiceTextInput from "../components/VoiceTextInput";
+import { EMBEDDED_PHONE_COUNTRIES } from "./auth/phoneNumber";
 
 type MarketTab = "Annonces" | "Local / Made in" | "Services & Métiers";
 type ListingCategory =
@@ -92,7 +93,19 @@ const TRADE_CATEGORIES: TradeCategory[] = [
   "Couture",
   "Boulangerie",
 ];
-const COUNTRIES = ["Tous les pays", "Sénégal", "Côte d'Ivoire", "Bénin"];
+const FALLBACK_COUNTRIES = [
+  { code: "SN", name: "Sénégal", prefix: "+221" },
+  { code: "CI", name: "Côte d'Ivoire", prefix: "+225" },
+  { code: "BJ", name: "Bénin", prefix: "+229" },
+];
+const MARKET_COUNTRIES =
+  EMBEDDED_PHONE_COUNTRIES.length > 0
+    ? EMBEDDED_PHONE_COUNTRIES
+    : FALLBACK_COUNTRIES;
+const COUNTRY_OPTIONS = [
+  { code: "ALL", name: "Tous les pays" },
+  ...MARKET_COUNTRIES,
+];
 const MAX_IMAGE_BYTES = 300 * 1024;
 const VALIDATION_FIELD_LABELS: Record<string, string> = {
   title: "Titre",
@@ -217,7 +230,7 @@ export default function MarketplaceScreen() {
     return true;
   };
   const [activeTab, setActiveTab] = useState<MarketTab>("Annonces");
-  const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
+  const [selectedCountry, setSelectedCountry] = useState("ALL");
   const [countryMenuOpen, setCountryMenuOpen] = useState(false);
   const [listingCategory, setListingCategory] =
     useState<ListingCategory>("Tous");
@@ -351,14 +364,8 @@ export default function MarketplaceScreen() {
         if (selectedCategory !== "ALL") {
           query.set("category", selectedCategory);
         }
-        const selectedCountryCode: Record<string, string> = {
-          Sénégal: "SN",
-          "Côte d'Ivoire": "CI",
-          Bénin: "BJ",
-        };
-        const countryCode = selectedCountryCode[selectedCountry];
-        if (countryCode) {
-          query.set("country_code", countryCode);
+        if (selectedCountry !== "ALL") {
+          query.set("country_code", selectedCountry);
           query.set("scope", "country");
         }
         const response = await apiFetch(
@@ -889,17 +896,20 @@ export default function MarketplaceScreen() {
           >
             <Globe color="#2563eb" size={19} />
             <Text style={styles.countryLabel}>Pays cibles :</Text>
-            <Text style={styles.countryValue}>{selectedCountry}</Text>
+            <Text style={styles.countryValue}>
+              {COUNTRY_OPTIONS.find((country) => country.code === selectedCountry)?.name ??
+                "Tous les pays"}
+            </Text>
             <Text style={styles.chevron}>{countryMenuOpen ? "⌃" : "⌄"}</Text>
           </Pressable>
           {countryMenuOpen && (
             <View style={styles.countryOptions}>
-              {COUNTRIES.map((country) => (
+              {COUNTRY_OPTIONS.map((country) => (
                 <Pressable
                   accessibilityRole="button"
-                  key={country}
+                  key={country.code}
                   onPress={() => {
-                    setSelectedCountry(country);
+                    setSelectedCountry(country.code);
                     setCountryMenuOpen(false);
                   }}
                   style={styles.countryOption}
@@ -907,11 +917,11 @@ export default function MarketplaceScreen() {
                   <Text
                     style={[
                       styles.countryOptionText,
-                      selectedCountry === country &&
+                      selectedCountry === country.code &&
                         styles.countryOptionTextSelected,
                     ]}
                   >
-                    {country}
+                    {country.name}
                   </Text>
                 </Pressable>
               ))}
@@ -920,9 +930,9 @@ export default function MarketplaceScreen() {
           <View style={styles.rangeNote}>
             <MapPin color="#64748b" size={14} />
             <Text style={styles.rangeText}>
-              {selectedCountry === "Tous les pays"
+              {selectedCountry === "ALL"
                 ? "Portée locale : 0–100 km"
-                : `Affichage par pays : ${selectedCountry}`}
+                : `Affichage par pays : ${COUNTRY_OPTIONS.find((country) => country.code === selectedCountry)?.name ?? selectedCountry}`}
             </Text>
           </View>
         </View>

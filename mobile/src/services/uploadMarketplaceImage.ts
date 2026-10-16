@@ -32,7 +32,7 @@ export const uploadMarketplaceImage = async (
     const message =
       error instanceof Error ? error.message : "Impossible de joindre le serveur.";
     throw new MediaUploadError(
-      "Le média n'a pas pu être téléversé.",
+      "Cloudinary a renvoyé une réponse invalide pour la photo.",
       `Étape : signature\nURL de signature : ${API_BASE_URL}/v1/media/sign\nErreur : ${message}`,
     );
   }
@@ -53,7 +53,9 @@ export const uploadMarketplaceImage = async (
         ? payload.error
         : "Impossible de préparer la photo de l'annonce.";
     throw new MediaUploadError(
-      "Le média n'a pas pu être téléversé.",
+      message.startsWith("Le téléversement média n'est pas configuré")
+        ? message
+        : "Le serveur n'a pas pu préparer le téléversement de la photo.",
       `Étape : signature\nURL de signature : ${API_BASE_URL}/v1/media/sign\nStatut HTTP : ${response.status}\nMessage : ${message}`,
     );
   }
@@ -94,7 +96,9 @@ export const uploadMarketplaceImage = async (
           ? error.message
           : "Réponse Cloudinary indisponible.";
     throw new MediaUploadError(
-      "Le média n'a pas pu être téléversé.",
+      status
+        ? "Cloudinary a refusé le téléversement de la photo. Vérifiez sa configuration et réessayez."
+        : "Cloudinary est injoignable pour le moment. Réessayez plus tard.",
       [
         "Étape : téléversement Cloudinary",
         `URL : ${uploadUrl}`,

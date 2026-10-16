@@ -60,7 +60,9 @@ export const uploadEmergencyMedia = async (
         ? payload.error
         : "Impossible de préparer le média d'urgence.";
     throw new MediaUploadError(
-      "Le média d'urgence n'a pas pu être téléversé.",
+      message.startsWith("Le téléversement média n'est pas configuré")
+        ? message
+        : "Le serveur n'a pas pu préparer le téléversement du média d'urgence.",
       `Étape : signature\nURL : ${signUrl}\nStatut HTTP : ${response.status}\nMessage : ${message}`,
     );
   }
@@ -89,7 +91,7 @@ export const uploadEmergencyMedia = async (
       typeof upload.data.secure_url !== "string"
     ) {
       throw new MediaUploadError(
-        "Le média d'urgence n'a pas pu être téléversé.",
+        "Cloudinary a renvoyé une réponse invalide pour le média d'urgence.",
         `Étape : vérification de la réponse Cloudinary\nURL : ${uploadUrl}\nType de ressource : ${mediaKind}\nTimestamp signé : ${signature.timestamp}\nParamètres signés : folder, public_id, timestamp\nStatut HTTP : 200\nMessage Cloudinary : identifiant ou URL inattendu.`,
       );
     }
@@ -107,7 +109,9 @@ export const uploadEmergencyMedia = async (
           ? error.message
           : "Réponse Cloudinary indisponible.";
     throw new MediaUploadError(
-      "Le média d'urgence n'a pas pu être téléversé.",
+      status
+        ? "Cloudinary a refusé le téléversement du média d'urgence. Vérifiez sa configuration et réessayez."
+        : "Cloudinary est injoignable pour le moment. Réessayez plus tard.",
       [
         "Étape : téléversement Cloudinary",
         `URL : ${uploadUrl}`,

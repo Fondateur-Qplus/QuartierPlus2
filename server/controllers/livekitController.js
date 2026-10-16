@@ -22,9 +22,14 @@ export const createLiveKitToken = async (request, response) => {
         "Nom de room invalide. Utilisez emergency, grin, sos_<id> ou channel_<id>.",
     });
   }
-  if (!env.livekitApiKey || !env.livekitApiSecret || !env.livekitUrl) {
+  if (!env.livekitConfigurationIsUsable) {
+    const details = env.livekitConfigurationProblems.join(", ");
+    console.error(
+      `LiveKit is unavailable; missing or invalid configuration: ${details}.`,
+    );
     return response.status(503).json({
-      error: "Le service audio LiveKit n'est pas configuré.",
+      error:
+        `Talkie-walkie indisponible : vérifiez ${details}.`,
     });
   }
 

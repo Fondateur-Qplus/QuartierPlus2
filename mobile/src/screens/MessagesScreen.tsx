@@ -851,13 +851,9 @@ export default function MessagesScreen() {
   const openPtt = () => {
     if (selectedChannelId !== "emergency") return;
     setIsPttVisible(true);
-    void ensureLiveKitRoom().catch((error: unknown) => {
-      setPttError(
-        error instanceof Error
-          ? error.message
-          : "Impossible de rejoindre la room audio.",
-      );
-    });
+    void ensureLiveKitRoom().catch(() =>
+      setPttError("Talkie-walkie indisponible"),
+    );
   };
 
   const startTalking = async () => {
@@ -867,13 +863,9 @@ export default function MessagesScreen() {
       if (!pttPressedRef.current) return;
       await room.localParticipant.setMicrophoneEnabled(true);
       if (pttPressedRef.current) setIsTalking(true);
-    } catch (error) {
+    } catch {
       pttPressedRef.current = false;
-      setPttError(
-        error instanceof Error
-          ? error.message
-          : "Impossible d'activer le microphone.",
-      );
+      setPttError("Talkie-walkie indisponible");
     }
   };
 
@@ -1246,7 +1238,7 @@ export default function MessagesScreen() {
           accessibilityLabel="Saisir un message"
           onChangeText={setDraftMessage}
           onSubmitEditing={() => void sendMessage()}
-          placeholder="Écrire un message..."
+          placeholder="Écrire un message…"
           placeholderTextColor="#94a3b8"
           returnKeyType="send"
           style={styles.composerInput}
@@ -1761,6 +1753,8 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     maxHeight: 80,
+    minHeight: 44,
+    minWidth: 0,
     paddingHorizontal: 3,
     paddingVertical: 8,
   },

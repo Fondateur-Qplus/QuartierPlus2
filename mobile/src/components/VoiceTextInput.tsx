@@ -65,7 +65,17 @@ export default function VoiceTextInput(props: TextInputProps) {
   const { width, ...textStyle } = flattenedStyle ?? {};
 
   return (
-    <View style={[styles.container, width ? { width } : null]}>
+    <View
+      style={[
+        styles.container,
+        {
+          flex: flattenedStyle?.flex,
+          minHeight: flattenedStyle?.minHeight,
+          minWidth: flattenedStyle?.minWidth,
+          width,
+        },
+      ]}
+    >
       <TextInput
         {...props}
         onChangeText={handleChangeText}
