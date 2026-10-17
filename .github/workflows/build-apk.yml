@@ -122,12 +122,6 @@ jobs:
             fi
           done
 
-      - name: Configure Google services
-        env:
-          GSJ: ${{ secrets.GOOGLE_SERVICES_JSON }}
-        run: |
-          printf '%s' "$GSJ" > mobile/google-services.json
-
       - name: Validate Firebase and app configuration
         env:
           EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
@@ -193,7 +187,7 @@ jobs:
               })();
             console.log(`Position de l’erreur de parse : ${position}`);
             console.error(
-              "::error::google-services.json invalide : reposer le secret avec gh secret set GOOGLE_SERVICES_JSON < google-services.json",
+              "::error::Le fichier mobile/google-services.json est invalide.",
             );
             process.exit(1);
           }
