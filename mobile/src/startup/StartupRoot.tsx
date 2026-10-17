@@ -12,9 +12,11 @@ import {
   setFirebaseAvailability,
 } from "./technicalStatus";
 
+const startupApiBaseUrl = process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/, "");
+
 type StartupState =
   | { status: "loading" }
-  | { status: "ready"; App: ComponentType }
+  | { status: "waking" | "ready"; App: ComponentType }
   | { status: "error"; message: string; error: unknown };
 
 type CrashlyticsClient = {
@@ -204,7 +206,32 @@ export default function StartupRoot({
 
     try {
       const App = require("../../App").default as ComponentType;
-      setStartup({ status: "ready", App });
+      if (!startupApiBaseUrl) {
+        setStartup({ status: "ready", App });
+      } else {
+        setStartup({ status: "waking", App });
+        void (async () => {
+          const deadline = Date.now() + 60_000;
+          while (mounted && Date.now() < deadline) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 5_000);
+            try {
+              const response = await fetch(`${startupApiBaseUrl}/health`, {
+                signal: controller.signal,
+              });
+              if (response.ok) {
+                setStartup({ status: "ready", App });
+                return;
+              }
+            } catch {
+            } finally {
+              clearTimeout(timeout);
+            }
+            await new Promise((resolve) => setTimeout(resolve, 2_000));
+          }
+          if (mounted) setStartup({ status: "ready", App });
+        })();
+      }
     } catch (error) {
       recordSanitizedError(
         "A required application or native module failed to load",
@@ -226,11 +253,15 @@ export default function StartupRoot({
   if (startup.status === "error") {
     return <StartupError error={startup.error} message={startup.message} />;
   }
-  if (startup.status === "loading") {
+  if (startup.status === "loading" || startup.status === "waking") {
     return (
       <View style={styles.container}>
         <ActivityIndicator color="#2563eb" size="large" />
-        <Text style={styles.message}>Démarrage de QuartierPlus…</Text>
+        <Text style={styles.message}>
+          {startup.status === "waking"
+            ? "Réveil du serveur…"
+            : "Démarrage de QuartierPlus…"}
+        </Text>
       </View>
     );
   }

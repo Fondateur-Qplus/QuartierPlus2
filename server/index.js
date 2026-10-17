@@ -19,10 +19,12 @@ import restSosRoutes from "./routes/restSosRoutes.js";
 import sosRoutes from "./routes/sosRoutes.js";
 import ticketsRoutes from "./routes/ticketsRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
+import adminRoutes from "./routes/adminRoutes.js";
 import { createServer } from "node:http";
 import { attachSocketServer } from "./sockets/index.js";
 import { handleHealth } from "./health.js";
 import { ensureDefaultChannels } from "./services/defaultChannels.js";
+import { verifySmtpTransport } from "./services/email.js";
 
 const app = express();
 
@@ -50,6 +52,7 @@ app.use(["/api/v1/payments", "/v1/payments"], paymentRoutes);
 app.use(["/api/v1/pro", "/v1/pro"], proRoutes);
 app.use(["/api/v1/tickets", "/v1/tickets"], ticketsRoutes);
 app.use(["/api/v1/users", "/v1/users"], userRoutes);
+app.use(["/api/v1/admin", "/v1/admin"], adminRoutes);
 app.use((error, _request, response, _next) => {
   console.error("Unhandled API error:", error);
   const status =
@@ -66,6 +69,8 @@ app.use((error, _request, response, _next) => {
 
 const server = createServer(app);
 const io = attachSocketServer(server);
+
+void verifySmtpTransport();
 
 void ensureDefaultChannels()
   .then(() => {

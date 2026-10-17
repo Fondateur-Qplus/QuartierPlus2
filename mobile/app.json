@@ -3,6 +3,7 @@
     "name": "QuartierPlus",
     "slug": "quartierplus",
     "owner": "quartierplus_bf",
+    "icon": "./assets/icon.png",
     "extra": {
       "eas": {
         "projectId": "fe1302fc-1f61-4787-96c3-5fbf4948737b"
@@ -87,6 +88,10 @@
     "android": {
       "googleServicesFile": "./google-services.json",
       "package": "com.administrateur.quartierplus",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
       "versionCode": 1,
       "permissions": [
         "android.permission.ACCESS_NETWORK_STATE",

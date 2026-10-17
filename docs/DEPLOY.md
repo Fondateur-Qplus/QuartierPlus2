@@ -13,9 +13,9 @@
   attend toutefois la création idempotente des canaux publics par pays.
 - Le démarrage (`npm start`) n'exécute pas de migration. Sur une base existante,
   appliquez les migrations manquantes ci-dessous avant de déployer le code.
-- L'historique Git, les configurations, les README et les workflows examinés
-  ne montrent pas d'hébergeur backend déjà utilisé. Les workflows existants
-  concernent les builds mobiles et EAS.
+- L'API de production est hébergée sur Render. Les workflows de build et de
+  mise à jour EAS utilisent son URL publique par défaut; un secret GitHub
+  `EXPO_PUBLIC_API_URL` défini explicitement la remplace.
 
 ## 1. Créer la base PostgreSQL
 
@@ -201,6 +201,14 @@ doit donc conserver le secret existant sous `JWT_SECRET` (sans rotation).
 5. Pour le workflow GitHub de génération APK, ajoutez aussi cette URL dans
    **Settings → Secrets and variables → Actions** sous le nom
    `EXPO_PUBLIC_API_URL`, puis relancez le workflow de build Android.
+
+Le workflow `.github/workflows/render-keepalive.yml` vérifie l'endpoint
+`/health` de l'API toutes les 10 minutes et peut aussi être lancé manuellement.
+Il envoie également une requête à `https://onrender.com`, mais ce domaine
+générique n'est pas l'URL du service QuartierPlus : seul le contrôle `/health`
+sur le domaine du service cible l'API. Les exécutions planifiées GitHub Actions
+peuvent être retardées ou omises; ce ping de meilleur effort ne garantit donc
+pas que Render maintiendra le service éveillé.
 
 `EXPO_PUBLIC_API_URL` est intégrée à l'application mobile et n'est pas une
 variable à mettre sur le service backend Render. Les valeurs `EXPO_PUBLIC_*`

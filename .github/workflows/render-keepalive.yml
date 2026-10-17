@@ -1,0 +1,40 @@
+name: Render keepalive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-keepalive
+  cancel-in-progress: true
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping the requested Render domain
+        run: |
+          HTTP_CODE="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 https://onrender.com)"
+          echo "GET https://onrender.com — HTTP $HTTP_CODE"
+
+      - name: Wake and check the QuartierPlus API
+        run: |
+          RESPONSE_FILE="$(mktemp)"
+          trap 'rm -f "$RESPONSE_FILE"' EXIT
+          HTTP_CODE="$(curl --silent --show-error --output "$RESPONSE_FILE" --write-out '%{http_code}' --max-time 30 https://quartierplus-api.onrender.com/health)"
+          echo "GET https://quartierplus-api.onrender.com/health — HTTP $HTTP_CODE"
+          if [ "$HTTP_CODE" != "200" ] || ! node -e '
+            try {
+              process.exit(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).status === "ok" ? 0 : 1);
+            } catch {
+              process.exit(1);
+            }
+          ' "$RESPONSE_FILE"; then
+            echo "::error::L’API QuartierPlus ne répond pas avec HTTP 200 et status « ok »."
+            exit 1
+          fi

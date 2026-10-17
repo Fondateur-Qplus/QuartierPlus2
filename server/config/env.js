@@ -12,7 +12,7 @@ const optionalUnquoted = (name) =>
 
 const required = (name) => {
   const value = optional(name);
-  if (!value) throw new Error(`Missing required environment variable: ${name}`);
+  if (!value) throw new Error(`Variable ${name} manquante.`);
   return value;
 };
 
@@ -108,6 +108,19 @@ const positiveInteger = (name, fallback) => {
 };
 
 const googleClientId = optional("GOOGLE_CLIENT_ID");
+const smtpHost = optional("SMTP_HOST");
+const smtpPortValue = optional("SMTP_PORT");
+const smtpPort = smtpPortValue ? Number(smtpPortValue) : 0;
+if (smtpPortValue && (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65535)) {
+  throw new Error("SMTP_PORT doit être un port valide.");
+}
+const smtpUser = optional("SMTP_USER");
+const smtpPass = optional("SMTP_PASS").replace(/\s+/g, "");
+const mailFrom = optional("MAIL_FROM");
+const smtpConfigured = Boolean(smtpHost && smtpPort && smtpUser && smtpPass && mailFrom);
+const smtpPartiallyConfigured = [smtpHost, smtpPortValue, smtpUser, smtpPass, mailFrom].some(Boolean) && !smtpConfigured;
+const emailProvider = optional("EMAIL_PROVIDER").toLowerCase() || (smtpConfigured ? "smtp" : "");
+const adminTestEmailToken = optional("ADMIN_TEST_EMAIL_TOKEN");
 const livekitApiKey = optionalUnquoted("LIVEKIT_API_KEY");
 const livekitApiSecret = optionalUnquoted("LIVEKIT_API_SECRET");
 const livekitUrl = optionalUnquoted("LIVEKIT_URL");
@@ -169,9 +182,16 @@ export const env = Object.freeze({
   otpTestAllowlist,
   smsDeliveryUrl,
   smsDeliveryToken,
-  emailProvider: optional("EMAIL_PROVIDER").toLowerCase(),
+  emailProvider,
   emailApiKey: optional("EMAIL_API_KEY"),
-  emailFrom: optional("EMAIL_FROM"),
+  emailFrom: mailFrom || optional("EMAIL_FROM"),
+  smtpHost,
+  smtpPort,
+  smtpUser,
+  smtpPass,
+  smtpConfigured,
+  smtpPartiallyConfigured,
+  adminTestEmailToken,
   livekitApiKey,
   livekitApiSecret,
   livekitUrl,
