@@ -1,0 +1,8 @@
+node_modules/
+.expo/
+.env
+.env.*
+!.env.example
+android/
+ios/
+**/.gradle/

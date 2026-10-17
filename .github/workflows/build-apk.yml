@@ -1,6 +1,9 @@
 name: Build Android Preview APK
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       etape:
@@ -9,13 +12,13 @@ on:
         options:
           - compilation
           - apk
-        default: compilation
+        default: apk
         required: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     concurrency:
       group: build-android-preview-apk-${{ github.ref }}
       cancel-in-progress: true
@@ -304,35 +307,56 @@ jobs:
           ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" \
             :app:assembleRelease --dry-run
 
-      - name: Build release APK
-        if: inputs.etape == 'apk'
-        working-directory: mobile/android
-        env:
-          EXPO_PUBLIC_GIT_SHA: ${{ github.sha }}
-          EXPO_PUBLIC_FIREBASE_API_KEY: ${{ secrets.EXPO_PUBLIC_FIREBASE_API_KEY }}
-          EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ secrets.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN }}
-          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
-          EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
-          EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
-          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
-          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
-          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
-          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
-          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL || 'wss://quartierplus-98gp8fx8.livekit.cloud' }}
+      - name: Configure Expo and EAS CLI
+        if: github.event_name == 'push' || inputs.etape == 'apk'
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build and download the preview APK from EAS
+        if: github.event_name == 'push' || inputs.etape == 'apk'
+        working-directory: mobile
         run: |
-          ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" \
-            -x lintVitalAnalyzeRelease \
-            -x lintVitalReportRelease \
-            -x lintVitalRelease \
-            -PreactNativeArchitectures=armeabi-v7a,arm64-v8a \
-            :app:assembleRelease
+          eas build --platform android --profile preview --non-interactive --wait
+
+          BUILD_LIST="$(eas build:list \
+            --platform android \
+            --build-profile preview \
+            --git-commit-hash "$GITHUB_SHA" \
+            --status finished \
+            --limit 1 \
+            --json)"
+          BUILD_ID="$(node -e '
+            const builds = JSON.parse(process.argv[1]);
+            const build = Array.isArray(builds) ? builds[0] : undefined;
+            if (!build?.id) {
+              console.error("Aucun build Android preview terminé trouvé pour ce commit.");
+              process.exit(1);
+            }
+            process.stdout.write(build.id);
+          ' "$BUILD_LIST")"
+
+          DOWNLOAD_RESULT="$(eas build:download --build-id "$BUILD_ID" --non-interactive --json)"
+          DOWNLOAD_PATH="$(node -e '
+            const result = JSON.parse(process.argv[1]);
+            if (typeof result.path !== "string" || !result.path.endsWith(".apk")) {
+              console.error("EAS n’a pas renvoyé le chemin d’un fichier APK.");
+              process.exit(1);
+            }
+            process.stdout.write(result.path);
+          ' "$DOWNLOAD_RESULT")"
+
+          mkdir -p artifacts
+          cp "$DOWNLOAD_PATH" artifacts/quartierplus-preview.apk
+          test -s artifacts/quartierplus-preview.apk
 
       - name: Upload release APK
-        if: inputs.etape == 'apk'
+        if: github.event_name == 'push' || inputs.etape == 'apk'
         uses: actions/upload-artifact@v4
         with:
           name: quartierplus-release-apk
-          path: mobile/android/app/build/outputs/apk/release/app-release.apk
+          path: mobile/artifacts/quartierplus-preview.apk
+          compression-level: 0
           retention-days: 7
