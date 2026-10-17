@@ -8,3 +8,6 @@ node_modules/
 /mobile/ios/
 /mobile/google-services.json
 /mobile/**/.gradle/
+.env
+mobile/.env
+!.env.example
