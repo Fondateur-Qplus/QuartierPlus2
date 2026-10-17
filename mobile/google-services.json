@@ -1,0 +1,28 @@
+{
+  "project_info": {
+    "project_number": "682615405169",
+    "project_id": "quartierplus-final",
+    "storage_bucket": "quartierplus-final.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:682615405169:android:412d0235ec8e42166ff9d0",
+        "android_client_info": {
+          "package_name": "com.administrateur.quartierplus"
+        }
+      },
+      "api_key": [
+        {
+          "current_key": "AIzaSyDO776Yy8ZTTi1PAH95I7dYQ7LdDYHxNMc"
+        }
+      ],
+      "services": {
+        "appanalytics_service": {
+          "status": 2
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
