@@ -1,0 +1,17 @@
+name: Keep QuartierPlus API awake
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping API health endpoint
+        run: curl -fsS --max-time 60 https://quartierplus-api.onrender.com/health

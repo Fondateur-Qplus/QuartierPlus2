@@ -1,5 +1,10 @@
 module.exports = ({ config }) => ({
   ...config,
+  android: {
+    ...config.android,
+    googleServicesFile:
+      process.env.GOOGLE_SERVICES_JSON ?? "./google-services.json",
+  },
   extra: {
     ...config.extra,
     commitSha: process.env.EXPO_PUBLIC_GIT_SHA ?? "unknown",

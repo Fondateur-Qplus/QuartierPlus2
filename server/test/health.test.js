@@ -25,7 +25,7 @@ test("health payload exposes the deployed commit and mobile contract version", a
   );
 });
 
-test("health handler returns before relying on database readiness", () => {
+test("health handler returns without database readiness", () => {
   const response = {
     code: 0,
     payload: null,

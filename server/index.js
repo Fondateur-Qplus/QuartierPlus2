@@ -72,19 +72,13 @@ const io = attachSocketServer(server);
 
 void verifySmtpTransport();
 
-void ensureDefaultChannels()
-  .then(() => {
-    server.listen(env.port, () => {
-      console.log(`QuartierPlus API listening on port ${env.port}`);
-    });
-  })
-  .catch((error) => {
-    console.error("Unable to initialize default public channels:", error);
-    process.exitCode = 1;
-    server.close();
-    io.close();
-    void pool.end();
-  });
+server.listen(env.port, () => {
+  console.log(`QuartierPlus API listening on port ${env.port}`);
+});
+
+void ensureDefaultChannels().catch((error) => {
+  console.error("Unable to initialize default public channels:", error);
+});
 
 const shutdown = (signal) => {
   console.log(`${signal} received; closing API server.`);
