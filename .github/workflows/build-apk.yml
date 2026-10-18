@@ -5,18 +5,11 @@ on:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      etape:
-        description: Étape à exécuter
-        type: choice
-        options:
-          - compilation
-          - apk
-        default: apk
-        required: true
 
 jobs:
   build:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 120
     concurrency:
@@ -26,11 +19,31 @@ jobs:
       - name: 🏗 Checkout repo
         uses: actions/checkout@v4
 
+      - name: Restore Firebase Android configuration
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const contents = process.env.GOOGLE_SERVICES_JSON;
+          if (!contents) {
+            console.error("::error::Le secret GOOGLE_SERVICES_JSON est absent.");
+            process.exit(1);
+          }
+          try {
+            JSON.parse(contents);
+          } catch {
+            console.error("::error::Le secret GOOGLE_SERVICES_JSON n’est pas un JSON valide.");
+            process.exit(1);
+          }
+          fs.writeFileSync("mobile/google-services.json", contents, { mode: 0o600 });
+          NODE
+
       - name: 🔎 Vérifier l’URL et la disponibilité de l’API
         env:
-          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
-          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
-          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_PROJECT_ID || secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
+          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
         run: |
           MISSING_CONFIG=""
           for name in EXPO_PUBLIC_API_URL EXPO_PUBLIC_FIREBASE_PROJECT_ID EXPO_PUBLIC_GOOGLE_MAPS_API_KEY; do
@@ -97,41 +110,20 @@ jobs:
           cache: npm
           cache-dependency-path: mobile/package-lock.json
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '17'
-
       - name: 📦 Install dependencies
         working-directory: mobile
         run: npm ci
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: 🔎 Debug Grin PiP Gradle source
-        run: |
-          git log -1 --decorate
-          for root in mobile/modules mobile/node_modules mobile/android; do
-            if [ -d "$root" ]; then
-              while IFS= read -r -d '' file; do
-                printf '\n--- %s ---\n' "$file"
-                cat "$file"
-              done < <(find -L "$root" -type f -name build.gradle -path '*/grin-pip/*' -print0 | sort -z)
-            fi
-          done
-
       - name: Validate Firebase and app configuration
         env:
-          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
-          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
-          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
-          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
-          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
-          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL || 'wss://quartierplus-98gp8fx8.livekit.cloud' }}
+          EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_PROJECT_ID || secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
+          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID || secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ vars.EXPO_PUBLIC_LIVEKIT_URL || secrets.EXPO_PUBLIC_LIVEKIT_URL || 'wss://quartierplus-98gp8fx8.livekit.cloud' }}
         run: |
           GOOGLE_SERVICES_FILE=mobile/google-services.json
           if [ ! -f "$GOOGLE_SERVICES_FILE" ]; then
@@ -263,94 +255,78 @@ jobs:
       - name: Expo prebuild
         env:
           EXPO_PUBLIC_GIT_SHA: ${{ github.sha }}
-          EXPO_PUBLIC_FIREBASE_API_KEY: ${{ secrets.EXPO_PUBLIC_FIREBASE_API_KEY }}
-          EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ secrets.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN }}
-          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
-          EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
-          EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
-          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
-          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
-          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
-          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
-          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL || 'wss://quartierplus-98gp8fx8.livekit.cloud' }}
+          EXPO_PUBLIC_FIREBASE_API_KEY: ${{ vars.EXPO_PUBLIC_FIREBASE_API_KEY || secrets.EXPO_PUBLIC_FIREBASE_API_KEY }}
+          EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || secrets.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_PROJECT_ID || secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
+          EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
+          EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID || secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
+          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID || secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ vars.EXPO_PUBLIC_LIVEKIT_URL || secrets.EXPO_PUBLIC_LIVEKIT_URL || 'wss://quartierplus-98gp8fx8.livekit.cloud' }}
         run: |
           cd mobile
           npx expo prebuild --clean --platform android
 
-      - name: Gradle compilation validation
-        if: inputs.etape == 'compilation'
-        working-directory: mobile/android
-        env:
-          EXPO_PUBLIC_GIT_SHA: ${{ github.sha }}
-          EXPO_PUBLIC_FIREBASE_API_KEY: ${{ secrets.EXPO_PUBLIC_FIREBASE_API_KEY }}
-          EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ secrets.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN }}
-          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
-          EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
-          EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
-          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
-          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
-          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
-          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
-          EXPO_PUBLIC_LIVEKIT_URL: ${{ secrets.EXPO_PUBLIC_LIVEKIT_URL || 'wss://quartierplus-98gp8fx8.livekit.cloud' }}
-        run: |
-          ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" help
-          ./gradlew -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" \
-            :app:assembleRelease --dry-run
-
       - name: Configure Expo and EAS CLI
-        if: github.event_name == 'push' || inputs.etape == 'apk'
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           packager: npm
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Build and download the preview APK from EAS
-        if: github.event_name == 'push' || inputs.etape == 'apk'
+      - name: Build on EAS and download the preview APK
+        id: eas-build
         working-directory: mobile
+        env:
+          EXPO_PUBLIC_GIT_SHA: ${{ github.sha }}
+          EXPO_PUBLIC_FIREBASE_API_KEY: ${{ vars.EXPO_PUBLIC_FIREBASE_API_KEY || secrets.EXPO_PUBLIC_FIREBASE_API_KEY }}
+          EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || secrets.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_PROJECT_ID || secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
+          EXPO_PUBLIC_FIREBASE_APP_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_APP_ID || secrets.EXPO_PUBLIC_FIREBASE_APP_ID }}
+          EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
+          EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID || secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
+          EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET: ${{ vars.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || secrets.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET }}
+          EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
+          EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID || secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
+          EXPO_PUBLIC_LIVEKIT_URL: ${{ vars.EXPO_PUBLIC_LIVEKIT_URL || secrets.EXPO_PUBLIC_LIVEKIT_URL || 'wss://quartierplus-98gp8fx8.livekit.cloud' }}
         run: |
-          eas build --platform android --profile preview --non-interactive --wait
-
-          BUILD_LIST="$(eas build:list \
-            --platform android \
-            --build-profile preview \
-            --git-commit-hash "$GITHUB_SHA" \
-            --status finished \
-            --limit 1 \
-            --json)"
-          BUILD_ID="$(node -e '
-            const builds = JSON.parse(process.argv[1]);
-            const build = Array.isArray(builds) ? builds[0] : undefined;
-            if (!build?.id) {
-              console.error("Aucun build Android preview terminé trouvé pour ce commit.");
-              process.exit(1);
-            }
-            process.stdout.write(build.id);
-          ' "$BUILD_LIST")"
-
-          DOWNLOAD_RESULT="$(eas build:download --build-id "$BUILD_ID" --non-interactive --json)"
-          DOWNLOAD_PATH="$(node -e '
-            const result = JSON.parse(process.argv[1]);
-            if (typeof result.path !== "string" || !result.path.endsWith(".apk")) {
-              console.error("EAS n’a pas renvoyé le chemin d’un fichier APK.");
-              process.exit(1);
-            }
-            process.stdout.write(result.path);
-          ' "$DOWNLOAD_RESULT")"
-
+          BUILD_JSON="$(eas build --platform android --profile preview --non-interactive --wait --json)"
+          BUILD_URL="$(BUILD_JSON="$BUILD_JSON" node <<'NODE'
+          const result = JSON.parse(process.env.BUILD_JSON);
+          const builds = Array.isArray(result) ? result : [result];
+          const build = [...builds].reverse().find((item) => item?.artifacts?.buildUrl);
+          const url = build?.artifacts?.buildUrl;
+          if (typeof url !== "string" || !url.startsWith("https://")) {
+            console.error("EAS n’a pas renvoyé d’URL HTTPS pour l’APK.");
+            process.exit(1);
+          }
+          process.stdout.write(url);
+          NODE
+          )"
+          printf 'EAS build: %s\n' "$BUILD_URL" >> "$GITHUB_STEP_SUMMARY"
+          printf 'build_url=%s\n' "$BUILD_URL" >> "$GITHUB_OUTPUT"
           mkdir -p artifacts
-          cp "$DOWNLOAD_PATH" artifacts/quartierplus-preview.apk
+          curl --fail --location --retry 3 --output artifacts/quartierplus-preview.apk "$BUILD_URL"
           test -s artifacts/quartierplus-preview.apk
 
-      - name: Upload release APK
-        if: github.event_name == 'push' || inputs.etape == 'apk'
-        uses: actions/upload-artifact@v4
-        with:
-          name: quartierplus-release-apk
-          path: mobile/artifacts/quartierplus-preview.apk
-          compression-level: 0
-          retention-days: 7
+      - name: Publish preview APK GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EAS_BUILD_URL: ${{ steps.eas-build.outputs.build_url }}
+        run: |
+          RELEASE_TAG="quartierplus-preview-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$RELEASE_TAG" \
+            mobile/artifacts/quartierplus-preview.apk \
+            --title "QuartierPlus Android preview ${GITHUB_RUN_NUMBER}" \
+            --notes "Build EAS: ${EAS_BUILD_URL}" \
+            --prerelease
+          printf 'GitHub Release: https://github.com/%s/releases/tag/%s\n' \
+            "$GITHUB_REPOSITORY" "$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
