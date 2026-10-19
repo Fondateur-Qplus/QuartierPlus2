@@ -34,6 +34,11 @@ jest.mock("expo-sqlite", () => {
   };
 });
 
+jest.mock("expo-secure-store", () => ({
+  getItemAsync: jest.fn(),
+  setItemAsync: jest.fn(),
+}));
+
 const {
   cachePosts,
   getCachedPosts,

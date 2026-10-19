@@ -1,12 +1,12 @@
 import * as Location from "expo-location";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
-import axios from "axios";
 import { File } from "expo-file-system";
 import {
   AlertTriangle,
   MapPin,
   Mic,
+  Play,
   Plus,
   RefreshCw,
   ShoppingBag,
@@ -40,6 +40,12 @@ import {
 import { openProfileStore } from "../storage/profileStore";
 import { API_BASE_URL, apiFetch } from "../services/api";
 import {
+  uploadCloudinaryMedia,
+  type CloudinaryUploadSignature,
+  type CloudinaryMediaType,
+} from "../services/cloudinaryUpload";
+import { MediaUploadError } from "../services/mediaUploadError";
+import {
   FEED_SCOPES,
   isFeedCoordinates,
   resolveFeedCountryCode,
@@ -57,6 +63,7 @@ type FeedEntry = {
   category: string;
   price?: string;
   imageUrl?: string;
+  mediaType?: CloudinaryMediaType;
 };
 
 type FeedError = {
@@ -64,25 +71,18 @@ type FeedError = {
   details: string;
 };
 
-type DraftPhoto = {
+type DraftMedia = {
   uri: string;
   filename: string;
-  mimeType: "image/jpeg";
+  mimeType: string;
+  resourceType: CloudinaryMediaType;
+  size: number;
+  duration?: number;
 };
 
-type MediaSignature = {
-  apiKey: string;
-  cloudName: string;
-  folder: string;
+type MediaSignature = CloudinaryUploadSignature & {
   max_bytes: number;
-  public_id: string;
-  resource_type: "image";
-  signature: string;
-  timestamp: number;
-};
-
-type CloudinaryImageUpload = {
-  public_id: string;
+  max_duration_seconds: number | null;
 };
 
 class PublicationApiError extends Error {}
@@ -119,6 +119,8 @@ const recordsFrom = (payload: unknown, key: string) => {
 const normalizePost = (value: unknown): FeedEntry | null => {
   if (!isRecord(value)) return null;
   const id = String(value.id ?? "");
+  const mediaType =
+    value.media_type === "video" ? "video" : "image";
   const title = String(
     value.title ??
       value.name ??
@@ -140,6 +142,7 @@ const normalizePost = (value: unknown): FeedEntry | null => {
       typeof (value.media_url ?? value.image_url) === "string"
         ? String(value.media_url ?? value.image_url)
         : undefined,
+    mediaType,
     price:
       free
         ? "Gratuit / Don"
@@ -217,7 +220,7 @@ export default function FeedScreen() {
   const [composerStage, setComposerStage] = useState<
     "closed" | "menu" | "preview"
   >("closed");
-  const [draftPhoto, setDraftPhoto] = useState<DraftPhoto | null>(null);
+  const [draftMedia, setDraftMedia] = useState<DraftMedia | null>(null);
   const [draftCaption, setDraftCaption] = useState("");
   const [draftScope, setDraftScope] = useState<FeedScope>("country");
   const [isPublishing, setIsPublishing] = useState(false);
@@ -582,17 +585,20 @@ export default function FeedScreen() {
     if (!user.phone_verified_at) {
       Alert.alert(
         "Téléphone à vérifier",
-        "Vérifiez votre numéro dans Profil avant de publier une photo.",
+        "Vérifiez votre numéro dans Profil avant de publier une photo ou une vidéo.",
       );
       return;
     }
-    setDraftPhoto(null);
+    setDraftMedia(null);
     setDraftCaption("");
     setDraftScope(scope);
     setComposerStage("menu");
   };
 
-  const selectPhoto = async (source: "camera" | "gallery") => {
+  const selectMedia = async (
+    source: "camera" | "gallery",
+    resourceType: CloudinaryMediaType,
+  ) => {
     setComposerStage("closed");
     try {
       const permission =
@@ -604,63 +610,79 @@ export default function FeedScreen() {
           "Accès nécessaire",
           source === "camera"
             ? "Autorisez l’accès à l’appareil photo dans les réglages."
-            : "Autorisez l’accès à vos photos dans les réglages.",
+            : "Autorisez l’accès à vos photos et vidéos dans les réglages.",
         );
         return;
       }
       const selection =
         source === "camera"
           ? await ImagePicker.launchCameraAsync({
-              mediaTypes: ["images"],
+              mediaTypes: resourceType === "image" ? ["images"] : ["videos"],
               quality: 1,
             })
           : await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ["images"],
+              mediaTypes: resourceType === "image" ? ["images"] : ["videos"],
               allowsMultipleSelection: false,
               quality: 1,
             });
       if (selection.canceled) return;
       const asset = selection.assets[0];
       if (!asset?.uri) {
-        throw new Error("La photo sélectionnée est indisponible.");
+        throw new Error("Le média sélectionné est indisponible.");
       }
-      if (new File(asset.uri).size > MAX_PHOTO_BYTES) {
-        throw new Error("La photo doit peser 10 Mo maximum.");
+      let mediaUri = asset.uri;
+      let mimeType = asset.mimeType ?? "video/mp4";
+      let filename =
+        asset.fileName ??
+        `quartierplus-${Date.now()}.${resourceType === "image" ? "jpg" : "mp4"}`;
+      if (resourceType === "image") {
+        const sourceSize = new File(asset.uri).size;
+        if (sourceSize > MAX_PHOTO_BYTES) {
+          throw new Error("La photo doit peser 10 Mo maximum.");
+        }
+        const resizeActions =
+          Math.max(asset.width, asset.height) > MAX_PHOTO_DIMENSION
+            ? [
+                {
+                  resize:
+                    asset.width >= asset.height
+                      ? { width: MAX_PHOTO_DIMENSION }
+                      : { height: MAX_PHOTO_DIMENSION },
+                },
+              ]
+            : [];
+        const optimized = await ImageManipulator.manipulateAsync(
+          asset.uri,
+          resizeActions,
+          {
+            compress: 0.82,
+            format: ImageManipulator.SaveFormat.JPEG,
+          },
+        );
+        mediaUri = optimized.uri;
+        mimeType = "image/jpeg";
+        filename = `quartierplus-${Date.now()}.jpg`;
       }
-      const resizeActions =
-        Math.max(asset.width, asset.height) > MAX_PHOTO_DIMENSION
-          ? [
-              {
-                resize:
-                  asset.width >= asset.height
-                    ? { width: MAX_PHOTO_DIMENSION }
-                    : { height: MAX_PHOTO_DIMENSION },
-              },
-            ]
-          : [];
-      const optimized = await ImageManipulator.manipulateAsync(
-        asset.uri,
-        resizeActions,
-        {
-          compress: 0.82,
-          format: ImageManipulator.SaveFormat.JPEG,
-        },
-      );
-      if (!optimized.uri || new File(optimized.uri).size > MAX_PHOTO_BYTES) {
+      const size = new File(mediaUri).size;
+      if (resourceType === "image" && size > MAX_PHOTO_BYTES) {
         throw new Error("La photo optimisée dépasse la limite de 10 Mo.");
       }
-      setDraftPhoto({
-        uri: optimized.uri,
-        filename: `quartierplus-${Date.now()}.jpg`,
-        mimeType: "image/jpeg",
+      setDraftMedia({
+        uri: mediaUri,
+        filename,
+        mimeType,
+        resourceType,
+        size,
+        duration:
+          typeof asset.duration === "number" ? asset.duration / 1000 : undefined,
       });
       setComposerStage("preview");
     } catch (selectionError) {
       Alert.alert(
-        "Photo indisponible",
+        resourceType === "image" ? "Photo indisponible" : "Vidéo indisponible",
         selectionError instanceof Error
           ? selectionError.message
-          : "Impossible de préparer cette photo. Réessayez.",
+          : "Impossible de préparer ce média. Réessayez.",
       );
     }
   };
@@ -671,11 +693,11 @@ export default function FeedScreen() {
     setIsPublishing(false);
     setUploadProgress(0);
     setComposerStage("closed");
-    setDraftPhoto(null);
+    setDraftMedia(null);
   };
 
-  const publishPhoto = async () => {
-    if (!draftPhoto || !API_BASE_URL || !countryCode) {
+  const publishMedia = async () => {
+    if (!draftMedia || !API_BASE_URL || !countryCode) {
       Alert.alert(
         "Publication indisponible",
         !API_BASE_URL
@@ -687,7 +709,7 @@ export default function FeedScreen() {
     if (isOffline) {
       Alert.alert(
         "Connexion nécessaire",
-        "Reconnectez-vous à Internet pour publier votre photo.",
+        "Reconnectez-vous à Internet pour publier votre média.",
       );
       return;
     }
@@ -733,7 +755,7 @@ export default function FeedScreen() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ media_type: "image" }),
+          body: JSON.stringify({ media_type: draftMedia.resourceType }),
           signal: controller.signal,
         },
       );
@@ -755,60 +777,57 @@ export default function FeedScreen() {
         typeof signaturePayload.signature !== "string" ||
         typeof signaturePayload.timestamp !== "number" ||
         typeof signaturePayload.max_bytes !== "number" ||
-        signaturePayload.resource_type !== "image"
+        signaturePayload.resource_type !== draftMedia.resourceType ||
+        !(
+          signaturePayload.max_duration_seconds === null ||
+          typeof signaturePayload.max_duration_seconds === "number"
+        )
       ) {
         throw new Error("La signature reçue est invalide.");
       }
       const signature = signaturePayload as MediaSignature;
-      if (new File(draftPhoto.uri).size > Math.min(MAX_PHOTO_BYTES, signature.max_bytes)) {
+      const maxAllowedBytes =
+        draftMedia.resourceType === "image"
+          ? Math.min(MAX_PHOTO_BYTES, signature.max_bytes)
+          : signature.max_bytes;
+      if (draftMedia.size > maxAllowedBytes) {
         throw new PublicationApiError(
-          "La photo optimisée dépasse la limite de taille autorisée.",
+          "Le média dépasse la limite de taille autorisée.",
         );
       }
-
-      const formData = new FormData();
-      const uploadFile = {
-        uri: draftPhoto.uri,
-        name: draftPhoto.filename,
-        type: draftPhoto.mimeType,
-      };
-      const nativeFormData = formData as FormData & {
-        append: (name: string, value: string | typeof uploadFile) => void;
-      };
-      nativeFormData.append("file", uploadFile);
-      formData.append("api_key", signature.apiKey);
-      formData.append("timestamp", String(signature.timestamp));
-      formData.append("folder", signature.folder);
-      formData.append("public_id", signature.public_id);
-      formData.append("signature", signature.signature);
-
-      const upload = await axios.post<CloudinaryImageUpload>(
-        `https://api.cloudinary.com/v1_1/${signature.cloudName}/image/upload`,
-        formData,
+      if (
+        draftMedia.resourceType === "video" &&
+        (typeof signature.max_duration_seconds !== "number" ||
+          (draftMedia.duration !== undefined &&
+            draftMedia.duration > signature.max_duration_seconds))
+      ) {
+        throw new PublicationApiError(
+          `La vidéo doit durer au maximum ${signature.max_duration_seconds ?? 30} secondes.`,
+        );
+      }
+      const uploaded = await uploadCloudinaryMedia(
+        signature,
+        {
+          uri: draftMedia.uri,
+          name: draftMedia.filename,
+          type: draftMedia.mimeType,
+          size: draftMedia.size,
+        },
         {
           signal: controller.signal,
-          timeout: 20_000,
-          onUploadProgress(event) {
-            if (!event.total) return;
-            setUploadProgress(Math.min(90, Math.round((event.loaded / event.total) * 90)));
-          },
+          onProgress: setUploadProgress,
         },
       );
-      if (
-        typeof upload.data?.public_id !== "string" ||
-        upload.data.public_id !== signature.public_id
-      ) {
-        throw new Error("La réponse du téléversement est invalide.");
-      }
       setUploadProgress(94);
+      postRequestStarted = true;
       const postResponse = await apiFetch(`${API_BASE_URL}/v1/posts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           caption: draftCaption.trim(),
           scope: draftScope,
-          media_type: "image",
-          media_public_id: upload.data.public_id,
+          media_type: draftMedia.resourceType,
+          media_public_id: uploaded.publicId,
           ...(position
             ? {
                 latitude: position.latitude,
@@ -828,20 +847,19 @@ export default function FeedScreen() {
       }
       setUploadProgress(100);
       setComposerStage("closed");
-      setDraftPhoto(null);
+      setDraftMedia(null);
       setDraftCaption("");
       refresh();
     } catch (publishError) {
       if (controller.signal.aborted) return;
-      console.error("Unable to publish photo:", publishError);
+      console.error("Unable to publish media:", publishError);
       if (postRequestStarted || !draftCaption.trim()) {
         Alert.alert(
           "Publication impossible",
-          publishError instanceof PublicationApiError
+          publishError instanceof PublicationApiError ||
+          publishError instanceof MediaUploadError
             ? publishError.message
-            : axios.isAxiosError(publishError)
-              ? "Le téléversement a échoué. Vérifiez la connexion puis réessayez."
-              : "Impossible de publier cette photo. Réessayez dans un instant.",
+            : "Impossible de publier ce média. Réessayez dans un instant.",
         );
         return;
       }
@@ -871,12 +889,12 @@ export default function FeedScreen() {
           );
         }
         setComposerStage("closed");
-        setDraftPhoto(null);
+        setDraftMedia(null);
         setDraftCaption("");
         refresh();
         Alert.alert(
           "Publication texte seule",
-          "Le média n’a pas pu être téléversé. Votre publication texte a été enregistrée.",
+          "Le média n'a pas pu être téléversé. Votre publication texte a été enregistrée.",
         );
       } catch (fallbackError) {
         if (controller.signal.aborted) return;
@@ -884,11 +902,10 @@ export default function FeedScreen() {
           "Publication impossible",
           fallbackError instanceof PublicationApiError
             ? fallbackError.message
-            : publishError instanceof PublicationApiError
+            : publishError instanceof PublicationApiError ||
+              publishError instanceof MediaUploadError
               ? publishError.message
-              : axios.isAxiosError(publishError)
-                ? "Le téléversement et la publication texte ont échoué. Vérifiez la connexion puis réessayez."
-                : "Impossible de publier cette photo. Réessayez dans un instant.",
+              : "Le téléversement et la publication texte ont échoué. Vérifiez la connexion puis réessayez.",
         );
       }
     } finally {
@@ -1060,7 +1077,27 @@ export default function FeedScreen() {
                       </View>
                       {entry.price ? <Text style={styles.price}>{entry.price}</Text> : null}
                     </View>
-                    {entry.imageUrl ? (
+                    {entry.imageUrl && entry.mediaType === "video" ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Ouvrir la vidéo publiée"
+                        onPress={() => {
+                          const mediaUrl = entry.imageUrl;
+                          if (!mediaUrl) return;
+                          void Linking.openURL(mediaUrl).catch((error: unknown) => {
+                            console.error("Unable to open published video:", error);
+                            Alert.alert(
+                              "Vidéo indisponible",
+                              "Impossible d’ouvrir cette vidéo sur cet appareil.",
+                            );
+                          });
+                        }}
+                        style={[styles.cardImage, styles.videoAction]}
+                      >
+                        <Play color="#2563eb" fill="#2563eb" size={25} />
+                        <Text style={styles.videoActionText}>Ouvrir la vidéo</Text>
+                      </Pressable>
+                    ) : entry.imageUrl ? (
                       <Image
                         accessibilityLabel="Photo publiée"
                         resizeMode="cover"
@@ -1115,7 +1152,7 @@ export default function FeedScreen() {
               <>
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => void selectPhoto("camera")}
+                  onPress={() => void selectMedia("camera", "image")}
                   style={styles.composerOption}
                 >
                   <Text style={styles.composerOptionText}>Photo</Text>
@@ -1123,7 +1160,7 @@ export default function FeedScreen() {
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => void selectPhoto("gallery")}
+                  onPress={() => void selectMedia("gallery", "image")}
                   style={styles.composerOption}
                 >
                   <Text style={styles.composerOptionText}>Galerie</Text>
@@ -1131,17 +1168,19 @@ export default function FeedScreen() {
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => {
-                    setComposerStage("closed");
-                    Alert.alert(
-                      "Vidéo au prochain build",
-                      "La prévisualisation vidéo nécessite le prochain build Android/iOS. La sélection et la publication vidéo ne sont pas activées dans cette mise à jour OTA.",
-                    );
-                  }}
+                  onPress={() => void selectMedia("gallery", "video")}
                   style={styles.composerOption}
                 >
                   <Text style={styles.composerOptionText}>Vidéo</Text>
-                  <Text style={styles.composerHelp}>Disponible après le prochain build</Text>
+                  <Text style={styles.composerHelp}>Choisir une vidéo existante</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => void selectMedia("camera", "video")}
+                  style={styles.composerOption}
+                >
+                  <Text style={styles.composerOptionText}>Filmer</Text>
+                  <Text style={styles.composerHelp}>Enregistrer une vidéo</Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
@@ -1153,13 +1192,22 @@ export default function FeedScreen() {
               </>
             ) : (
               <>
-                {draftPhoto ? (
+                {draftMedia?.resourceType === "image" ? (
                   <Image
                     accessibilityLabel="Aperçu de votre photo"
                     resizeMode="contain"
-                    source={{ uri: draftPhoto.uri }}
+                    source={{ uri: draftMedia.uri }}
                     style={styles.photoPreview}
                   />
+                ) : null}
+                {draftMedia?.resourceType === "video" ? (
+                  <View style={styles.photoPreview}>
+                    <Text style={styles.composerOptionText}>Vidéo prête à publier</Text>
+                    <Text style={styles.composerHelp}>
+                      {draftMedia.filename} ·{" "}
+                      {(draftMedia.size / (1024 * 1024)).toFixed(1)} Mo
+                    </Text>
+                  </View>
                 ) : null}
                 <TextInput
                   accessibilityLabel="Légende de la publication"
@@ -1224,7 +1272,7 @@ export default function FeedScreen() {
                   {!isPublishing ? (
                     <Pressable
                       accessibilityRole="button"
-                      onPress={() => void publishPhoto()}
+                      onPress={() => void publishMedia()}
                       style={styles.publishButton}
                     >
                       <Text style={styles.publishButtonText}>Publier</Text>
@@ -1336,6 +1384,13 @@ const styles = StyleSheet.create({
     marginTop: 12,
     width: "100%",
   },
+  videoAction: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    justifyContent: "center",
+  },
+  videoActionText: { color: "#1d4ed8", fontSize: 14, fontWeight: "700" },
   cardTitle: { color: "#0f172a", fontSize: 17, fontWeight: "700", marginTop: 13 },
   body: { color: "#475569", fontSize: 14, lineHeight: 21, marginTop: 6 },
   location: { alignItems: "center", flexDirection: "row", gap: 5, marginTop: 11 },

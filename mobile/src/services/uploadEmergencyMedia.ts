@@ -1,18 +1,15 @@
-import axios from "axios";
+import { File } from "expo-file-system";
 import { apiFetch, API_BASE_URL, type ApiFetchResponse } from "./api";
+import {
+  uploadCloudinaryMedia,
+  type CloudinaryUploadSignature,
+} from "./cloudinaryUpload";
 import { MediaUploadError } from "./mediaUploadError";
 
 type MediaKind = "image" | "video";
 
-type UploadSignature = {
-  apiKey: string;
-  cloudName: string;
-  folder: string;
+type UploadSignature = CloudinaryUploadSignature & {
   max_bytes: number;
-  public_id: string;
-  resource_type: MediaKind;
-  signature: string;
-  timestamp: number;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -68,59 +65,34 @@ export const uploadEmergencyMedia = async (
   }
 
   const signature = payload as UploadSignature;
-  const formData = new FormData();
-  const file = { uri, name: filename, type: mimeType };
-  (formData as FormData & {
-    append: (name: string, value: string | typeof file) => void;
-  }).append("file", file);
-  formData.append("api_key", signature.apiKey);
-  formData.append("timestamp", String(signature.timestamp));
-  formData.append("folder", signature.folder);
-  formData.append("public_id", signature.public_id);
-  formData.append("signature", signature.signature);
-
-  const uploadUrl = `https://api.cloudinary.com/v1_1/${signature.cloudName}/${mediaKind}/upload`;
-  try {
-    const upload = await axios.post<{ public_id: string; secure_url: string }>(
-      uploadUrl,
-      formData,
-      { timeout: 20_000 },
+  const size = new File(uri).size;
+  if (size > signature.max_bytes) {
+    throw new MediaUploadError(
+      "Le média d'urgence dépasse la taille autorisée.",
+      `Taille du fichier : ${size} octets; limite : ${signature.max_bytes} octets.`,
     );
-    if (
-      upload.data.public_id !== signature.public_id ||
-      typeof upload.data.secure_url !== "string"
-    ) {
+  }
+  try {
+    const result = await uploadCloudinaryMedia(signature, {
+      uri,
+      name: filename,
+      type: mimeType,
+      size,
+    });
+    if (!result.secureUrl) {
       throw new MediaUploadError(
-        "Cloudinary a renvoyé une réponse invalide pour le média d'urgence.",
-        `Étape : vérification de la réponse Cloudinary\nURL : ${uploadUrl}\nType de ressource : ${mediaKind}\nTimestamp signé : ${signature.timestamp}\nParamètres signés : folder, public_id, timestamp\nStatut HTTP : 200\nMessage Cloudinary : identifiant ou URL inattendu.`,
+        "Cloudinary n'a pas renvoyé l'adresse du média d'urgence.",
+        "Statut HTTP : 200\nMessage Cloudinary : adresse sécurisée absente.",
       );
     }
-    return upload.data.secure_url;
+    return result.secureUrl;
   } catch (error) {
-    if (error instanceof MediaUploadError) throw error;
-    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
-    const data: unknown = axios.isAxiosError(error) ? error.response?.data : null;
-    const message =
-      isRecord(data) &&
-      isRecord(data.error) &&
-      typeof data.error.message === "string"
-        ? data.error.message
-        : error instanceof Error
-          ? error.message
-          : "Réponse Cloudinary indisponible.";
-    throw new MediaUploadError(
-      status
-        ? "Cloudinary a refusé le téléversement du média d'urgence. Vérifiez sa configuration et réessayez."
-        : "Cloudinary est injoignable pour le moment. Réessayez plus tard.",
-      [
-        "Étape : téléversement Cloudinary",
-        `URL : ${uploadUrl}`,
-        `Type de ressource : ${mediaKind}`,
-        `Timestamp signé : ${signature.timestamp}`,
-        "Paramètres signés : folder, public_id, timestamp",
-        `Statut HTTP : ${status ?? "indisponible"}`,
-        `Message Cloudinary : ${message}`,
-      ].join("\n"),
-    );
+    if (error instanceof MediaUploadError) {
+      throw new MediaUploadError(
+        "Le média d'urgence n'a pas pu être téléversé.",
+        error.technicalDetails,
+      );
+    }
+    throw error;
   }
 };

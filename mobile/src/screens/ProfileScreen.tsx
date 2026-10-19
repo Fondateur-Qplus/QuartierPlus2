@@ -199,6 +199,17 @@ export default function ProfileScreen() {
         }
         setSosNotificationsEnabled(savedPreferences.sosNotificationsEnabled);
         setDefaultRadius(`${savedPreferences.defaultRadiusKm} km`);
+        if (database.isMemoryFallback) {
+          const message =
+            "Stockage hors ligne indisponible. Réessayez dans quelques instants.";
+          setDatabaseError(message);
+          Alert.alert(
+            "Stockage hors ligne indisponible",
+            "Réessayez dans quelques instants.",
+          );
+        } else {
+          setDatabaseError(null);
+        }
         if (savedCountry) {
           const country = COUNTRIES.find(
             (entry) => entry.code === savedCountry.code,
@@ -213,10 +224,14 @@ export default function ProfileScreen() {
         setDatabaseReady(true);
       } catch (error) {
         if (!isMounted) return;
-        console.warn("Local profile storage could not be initialized.");
-        const message = "Les réglages hors ligne sont momentanément indisponibles.";
+        console.error("Local profile storage could not be initialized:", error);
+        const message =
+          "Stockage hors ligne indisponible. Réessayez dans quelques instants.";
         setDatabaseError(message);
-        Alert.alert("Stockage hors ligne indisponible", "Réessayez dans quelques instants.");
+        Alert.alert(
+          "Stockage hors ligne indisponible",
+          "Réessayez dans quelques instants.",
+        );
       }
     })();
     return () => {
@@ -281,6 +296,12 @@ export default function ProfileScreen() {
         code: country.code,
         emergencyNumbers: country.emergencyNumbers,
       });
+      if (database.isMemoryFallback) {
+        const message =
+          "Stockage hors ligne indisponible. Réessayez dans quelques instants.";
+        setDatabaseError(message);
+        Alert.alert("Stockage hors ligne indisponible", "Réessayez dans quelques instants.");
+      }
       setSelectedCountry(country);
       setCountryMenuOpen(false);
     } catch (error) {
@@ -404,6 +425,12 @@ export default function ProfileScreen() {
             position: contacts.length + 1,
           };
       await database.saveContact(saved);
+      if (database.isMemoryFallback) {
+        const message =
+          "Stockage hors ligne indisponible. Réessayez dans quelques instants.";
+        setDatabaseError(message);
+        Alert.alert("Stockage hors ligne indisponible", "Réessayez dans quelques instants.");
+      }
       setContacts((current) =>
         editingContact
           ? current.map((contact) =>
@@ -432,6 +459,12 @@ export default function ProfileScreen() {
         .filter((contact) => contact.id !== editingContact.id)
         .map((contact, index) => ({ ...contact, position: index + 1 }));
       await database.deleteContact(editingContact.id, remaining);
+      if (database.isMemoryFallback) {
+        const message =
+          "Stockage hors ligne indisponible. Réessayez dans quelques instants.";
+        setDatabaseError(message);
+        Alert.alert("Stockage hors ligne indisponible", "Réessayez dans quelques instants.");
+      }
       setContacts(remaining);
       setIsContactModalVisible(false);
     } catch (error) {
@@ -503,6 +536,12 @@ export default function ProfileScreen() {
     }
     try {
       await database.setPreferences(next);
+      if (database.isMemoryFallback) {
+        const message =
+          "Stockage hors ligne indisponible. Réessayez dans quelques instants.";
+        setDatabaseError(message);
+        Alert.alert("Stockage hors ligne indisponible", "Réessayez dans quelques instants.");
+      }
       setSosNotificationsEnabled(next.sosNotificationsEnabled);
       setDefaultRadius(`${next.defaultRadiusKm} km`);
       setFloatingButtonEnabled(next.voiceAssistantFloatingButton);

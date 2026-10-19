@@ -169,10 +169,14 @@ invaliderait les signatures des billets déjà émis.
 
 Les trois variables `CLOUDINARY_*` doivent être configurées ensemble pour
 activer les publications; aucune ne doit être copiée dans l'application mobile.
+Les signatures sont émises par l'API avec un timestamp et des paramètres triés;
+les vidéos de plus de 20 Mo sont téléversées par segments. En cas de refus
+Cloudinary, l'API journalise le statut HTTP et le message renvoyé.
 Les variables `POST_*` sont facultatives et remplacent les limites par défaut.
 LiveKit est facultatif au démarrage : si sa configuration est absente ou
-invalide, les fonctions vidéo et voix indiquent qu'elles sont en cours
-d'activation. Quand `BILLING_ENABLED=false`, les offres sont activées
+invalide, les journaux de l'API identifient les variables à corriger et le
+service de jeton renvoie une erreur précise. Quand `BILLING_ENABLED=false`,
+les offres sont activées
 immédiatement et affichées comme gratuites pendant la phase de test; mettez-le
 à `true` uniquement après avoir configuré FedaPay.
 

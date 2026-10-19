@@ -15,6 +15,10 @@
   Le moteur vocal et sa disponibilité sont vérifiés à la première activation,
   indépendamment de l'affichage du bouton flottant. Les erreurs de permission,
   de service et de langue restent visibles dans « Détails techniques ».
+- La permission d'enregistrement est demandée via `expo-audio` avant la
+  reconnaissance vocale. Si les préférences vocales ou de confidentialité ne
+  sont pas lisibles, l'assistant utilise le français par défaut et poursuit la
+  demande de permission; ces erreurs ne bloquent pas l'ouverture du microphone.
 - Le parseur local `mobile/src/services/voiceAssistant.ts` utilise intentions,
   synonymes et correspondance approximative, sans IA ni clé secrète. Il ouvre
   les surfaces existantes : carte, Marché, canaux URGENCES et ANNONCES, profil

@@ -17,6 +17,7 @@ const DEFAULT_PREFERENCES: AppPreferences = {
 };
 
 export const openProfileStore = async (): Promise<ProfileStore> => ({
+  isMemoryFallback: false,
   async getCountry() {
     const saved = globalThis.localStorage.getItem(COUNTRY_KEY);
     if (!saved) return null;

@@ -1,4 +1,5 @@
 import * as Speech from "expo-speech";
+import { requestRecordingPermissionsAsync } from "expo-audio";
 import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
@@ -313,7 +314,17 @@ export default function VoiceAssistantModal({
       if (requestId !== startRequestRef.current) return;
       speechLanguageRef.current =
         preferences.language === "en" ? "en-US" : "fr-FR";
+    } catch (preferenceError) {
+      if (requestId !== startRequestRef.current) return;
+      console.error("Unable to read voice preferences; using defaults:", preferenceError);
+      speechLanguageRef.current = "fr-FR";
+      setError("Impossible de préparer la permission du microphone.");
+      setTechnicalDetails(
+        "Échec de lecture des préférences vocales ou de confidentialité.",
+      );
+    }
 
+    try {
       const explanationSeen = await SecureStore.getItemAsync(
         PERMISSION_EXPLANATION_KEY,
       );
@@ -322,17 +333,16 @@ export default function VoiceAssistantModal({
         setPermissionExplanationVisible(true);
         return;
       }
-
-      await beginListening(requestId);
     } catch (caughtError) {
       if (requestId !== startRequestRef.current) return;
-      console.error("Unable to prepare voice assistant:", caughtError);
-      const message = "Impossible de préparer la permission du microphone.";
-      setError(message);
-      setFeedback(message);
-      setTechnicalDetails("Échec de lecture des préférences vocales ou de confidentialité.");
-      dispatchVoiceEvent("error");
+      console.error("Unable to read voice privacy preference; continuing:", caughtError);
+      setError("Impossible de préparer la permission du microphone.");
+      setTechnicalDetails(
+        "Échec de lecture des préférences vocales ou de confidentialité.",
+      );
     }
+    if (requestId !== startRequestRef.current) return;
+    await beginListening(requestId);
   }
 
   async function continueAfterPermissionExplanation() {
@@ -340,16 +350,14 @@ export default function VoiceAssistantModal({
     const requestId = startRequestRef.current;
     try {
       await SecureStore.setItemAsync(PERMISSION_EXPLANATION_KEY, "true");
-      if (requestId !== startRequestRef.current) return;
-      await beginListening(requestId, speechLanguageRef.current);
     } catch (caughtError) {
-      console.error("Unable to save voice privacy choice:", caughtError);
-      const message = "Impossible d’enregistrer votre choix de confidentialité.";
-      setError(message);
-      setFeedback(message);
-      setTechnicalDetails("Échec d’enregistrement du choix de confidentialité.");
-      dispatchVoiceEvent("error");
+      console.error("Unable to save voice privacy choice; continuing:", caughtError);
+      setTechnicalDetails(
+        "Échec d’enregistrement du choix de confidentialité; l’accès au microphone continue.",
+      );
     }
+    if (requestId !== startRequestRef.current) return;
+    await beginListening(requestId, speechLanguageRef.current);
   }
 
   async function beginListening(
@@ -357,14 +365,30 @@ export default function VoiceAssistantModal({
     language = speechLanguageRef.current,
   ) {
     try {
+      const recordingPermission = await requestRecordingPermissionsAsync();
+      if (requestId !== startRequestRef.current) return;
+      if (!recordingPermission.granted) {
+        throw new VoiceAssistantStartError(
+          "permission-denied",
+          speechErrorMessage("not-allowed", isOffline),
+        );
+      }
       const currentPermission =
         await ExpoSpeechRecognitionModule.getPermissionsAsync();
       if (requestId !== startRequestRef.current) return;
       let permission = currentPermission;
       if (!permission.granted) {
-        const requestAlreadyMade = await SecureStore.getItemAsync(
-          PERMISSION_REQUESTED_KEY,
-        );
+        let requestAlreadyMade: string | null = null;
+        try {
+          requestAlreadyMade = await SecureStore.getItemAsync(
+            PERMISSION_REQUESTED_KEY,
+          );
+        } catch (storageError) {
+          console.error("Unable to read microphone permission state:", storageError);
+          setTechnicalDetails(
+            "Impossible de lire l’état mémorisé de la permission; la demande continue.",
+          );
+        }
         if (requestId !== startRequestRef.current) return;
         if (requestAlreadyMade === "true") {
           throw new VoiceAssistantStartError(
@@ -372,7 +396,11 @@ export default function VoiceAssistantModal({
             speechErrorMessage("not-allowed", isOffline),
           );
         }
-        await SecureStore.setItemAsync(PERMISSION_REQUESTED_KEY, "true");
+        try {
+          await SecureStore.setItemAsync(PERMISSION_REQUESTED_KEY, "true");
+        } catch (storageError) {
+          console.error("Unable to save microphone permission state:", storageError);
+        }
         if (requestId !== startRequestRef.current) return;
         permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
       }

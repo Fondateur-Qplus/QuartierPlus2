@@ -37,17 +37,20 @@ export const createLiveKitToken = async (request, response) => {
   try {
     livekitUrl = new URL(env.livekitUrl);
   } catch {
+    console.error("LiveKit configuration error: LIVEKIT_URL is not a valid URL.");
     return response.status(503).json({
       error: "L'adresse du service audio LiveKit est invalide.",
     });
   }
   if (
-    !["wss:", "ws:"].includes(livekitUrl.protocol) ||
-    !livekitUrl.hostname ||
-    (livekitUrl.protocol === "ws:" && env.nodeEnv === "production")
+    livekitUrl.protocol !== "wss:" ||
+    !livekitUrl.hostname
   ) {
+    console.error(
+      "LiveKit configuration error: LIVEKIT_URL must be a valid wss:// URL.",
+    );
     return response.status(503).json({
-      error: "L'adresse LiveKit doit utiliser WSS en production.",
+      error: "L'adresse LiveKit doit utiliser une URL WSS valide.",
     });
   }
 

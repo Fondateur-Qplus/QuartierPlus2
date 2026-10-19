@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 
 process.env.NODE_ENV ??= "test";
@@ -11,6 +12,7 @@ process.env.DOTENV_CONFIG_PATH = "/dev/null";
 
 const {
   createPost,
+  logMediaUploadFailure,
   listFeed,
   reportPost,
   roundCoordinatesTo200mGrid,
@@ -125,6 +127,69 @@ test("upload signing is denied until the account has a verified phone", async (c
 
   assert.equal(response.statusCode, 403);
   assert.match(response.payload.error, /Vérifiez votre numéro/);
+});
+
+test("video signatures include timestamp, folder and public ID without exposing the API secret", async (context) => {
+  context.mock.method(pool, "query", async () => ({
+    rowCount: 1,
+    rows: [VERIFIED_USER],
+  }));
+  const response = createResponse();
+
+  await signMediaUpload(
+    { auth: { userId: USER_ID }, body: { media_type: "video" } },
+    response,
+    (error) => {
+      throw error;
+    },
+  );
+
+  const { folder, public_id: publicId, timestamp, signature } = response.payload;
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.payload.resource_type, "video");
+  assert.ok(Math.abs(Math.floor(Date.now() / 1000) - timestamp) <= 1);
+  assert.equal(
+    signature,
+    createHash("sha1")
+      .update(
+        `folder=${folder}&public_id=${publicId}&timestamp=${timestamp}test-api-secret`,
+      )
+      .digest("hex"),
+  );
+  assert.equal("apiSecret" in response.payload, false);
+  assert.equal(JSON.stringify(response.payload).includes("test-api-secret"), false);
+});
+
+test("client Cloudinary failures are logged with status and bounded message", (context) => {
+  const loggedErrors = [];
+  context.mock.method(console, "error", (...args) => loggedErrors.push(args));
+  const response = createResponse();
+
+  logMediaUploadFailure(
+    {
+      auth: { userId: USER_ID },
+      body: {
+        media_type: "video",
+        status: 400,
+        message: "Invalid video\u0000format",
+      },
+    },
+    response,
+  );
+
+  assert.equal(response.statusCode, 204);
+  assert.equal(response.ended, true);
+  assert.deepEqual(loggedErrors, [
+    [
+      "Cloudinary client upload failed:",
+      {
+        userId: USER_ID,
+        resourceType: "video",
+        status: 400,
+        message: "Invalid video format",
+      },
+    ],
+  ]);
 });
 
 test("photo publication verifies Cloudinary metadata and stores only rounded coordinates", async (context) => {

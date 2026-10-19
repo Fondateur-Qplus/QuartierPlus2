@@ -1,15 +1,12 @@
-import axios from "axios";
 import { apiFetch, API_BASE_URL } from "./api";
+import {
+  uploadCloudinaryMedia,
+  type CloudinaryUploadSignature,
+} from "./cloudinaryUpload";
 import { MediaUploadError } from "./mediaUploadError";
 
-type UploadSignature = {
-  apiKey: string;
-  cloudName: string;
-  folder: string;
+type UploadSignature = CloudinaryUploadSignature & {
   max_bytes: number;
-  public_id: string;
-  signature: string;
-  timestamp: number;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -46,7 +43,8 @@ export const uploadMarketplaceImage = async (
     typeof payload.public_id !== "string" ||
     typeof payload.signature !== "string" ||
     typeof payload.timestamp !== "number" ||
-    typeof payload.max_bytes !== "number"
+    typeof payload.max_bytes !== "number" ||
+    payload.resource_type !== "image"
   ) {
     const message =
       isRecord(payload) && typeof payload.error === "string"
@@ -63,66 +61,19 @@ export const uploadMarketplaceImage = async (
   if (size > Math.min(signature.max_bytes, 300 * 1024)) {
     throw new Error("La photo optimisée dépasse la limite autorisée.");
   }
-  const formData = new FormData();
-  const file = { uri, name: filename, type: "image/webp" };
-  (formData as FormData & {
-    append: (name: string, value: string | typeof file) => void;
-  }).append("file", file);
-  formData.append("api_key", signature.apiKey);
-  formData.append("timestamp", String(signature.timestamp));
-  formData.append("folder", signature.folder);
-  formData.append("public_id", signature.public_id);
-  formData.append("signature", signature.signature);
-
-  const uploadUrl = `https://api.cloudinary.com/v1_1/${signature.cloudName}/image/upload`;
-  let upload;
   try {
-    upload = await axios.post<{ public_id: string }>(
-      uploadUrl,
-      formData,
-      { timeout: 20_000 },
-    );
+    const result = await uploadCloudinaryMedia(signature, {
+      uri,
+      name: filename,
+      type: "image/webp",
+      size,
+    });
+    return result.publicId;
   } catch (error) {
-    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
-    const responseData: unknown = axios.isAxiosError(error)
-      ? error.response?.data
-      : null;
-    const cloudinaryMessage =
-      isRecord(responseData) &&
-      isRecord(responseData.error) &&
-      typeof responseData.error.message === "string"
-        ? responseData.error.message
-        : error instanceof Error
-          ? error.message
-          : "Réponse Cloudinary indisponible.";
-    throw new MediaUploadError(
-      status
-        ? "Cloudinary a refusé le téléversement de la photo. Vérifiez sa configuration et réessayez."
-        : "Cloudinary est injoignable pour le moment. Réessayez plus tard.",
-      [
-        "Étape : téléversement Cloudinary",
-        `URL : ${uploadUrl}`,
-        "Type de ressource : image",
-        `Timestamp signé : ${signature.timestamp}`,
-        "Paramètres signés : folder, public_id, timestamp",
-        `Statut HTTP : ${status ?? "indisponible"}`,
-        `Message Cloudinary : ${cloudinaryMessage}`,
-      ].join("\n"),
-    );
-  }
-  if (upload.data.public_id !== signature.public_id) {
+    if (error instanceof MediaUploadError) throw error;
     throw new MediaUploadError(
       "Le média n'a pas pu être téléversé.",
-      [
-        "Étape : vérification de la réponse Cloudinary",
-        `URL : ${uploadUrl}`,
-        "Type de ressource : image",
-        `Timestamp signé : ${signature.timestamp}`,
-        "Paramètres signés : folder, public_id, timestamp",
-        "Statut HTTP : 200",
-        "Message Cloudinary : identifiant public inattendu.",
-      ].join("\n"),
+      error instanceof Error ? error.message : "Erreur Cloudinary inconnue.",
     );
   }
-  return upload.data.public_id;
 };

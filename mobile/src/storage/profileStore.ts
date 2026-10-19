@@ -29,6 +29,7 @@ export type AppPreferences = {
 };
 
 export type ProfileStore = {
+  readonly isMemoryFallback: boolean;
   getCountry: () => Promise<StoredCountry | null>;
   setCountry: (country: StoredCountry) => Promise<void>;
   getContacts: () => Promise<TrustedContact[]>;
@@ -43,7 +44,18 @@ export type ProfileStore = {
 
 const LEGACY_DATABASE_NAME = "quartierplus-profile.db";
 const PREFERENCES_FALLBACK_KEY = "quartierplus.profile.preferences";
+const defaultPreferences = (): AppPreferences => ({
+  theme: "system",
+  language: "fr",
+  sosNotificationsEnabled: true,
+  defaultRadiusKm: 3,
+  voiceAssistantFloatingButton: false,
+});
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
+let memoryCountry: StoredCountry | null = null;
+let memoryContacts: TrustedContact[] = [];
+let memoryPreferences = defaultPreferences();
+let usingMemoryFallback = false;
 
 const hasTable = async (database: SQLite.SQLiteDatabase, name: string) => {
   const table = await database.getFirstAsync<{ name: string }>(
@@ -119,81 +131,203 @@ const openProfileDatabase = () => {
   return databasePromise;
 };
 
+const createMemoryProfileStore = (): ProfileStore => ({
+  isMemoryFallback: true,
+  async getCountry() {
+    return memoryCountry;
+  },
+  async setCountry(country) {
+    memoryCountry = country;
+  },
+  async getContacts() {
+    return [...memoryContacts];
+  },
+  async saveContact(contact) {
+    memoryContacts = memoryContacts.some((entry) => entry.id === contact.id)
+      ? memoryContacts.map((entry) => (entry.id === contact.id ? contact : entry))
+      : [...memoryContacts, contact];
+  },
+  async deleteContact(id, remainingContacts) {
+    memoryContacts = remainingContacts.filter((entry) => entry.id !== id);
+  },
+  async getPreferences() {
+    return memoryPreferences;
+  },
+  async setPreferences(preferences) {
+    memoryPreferences = normalizePreferences(preferences);
+  },
+});
+
+const reportProfileStorageFailure = (operation: string, error: unknown) => {
+  usingMemoryFallback = true;
+  console.error(`Profile storage ${operation} failed; using memory fallback:`, error);
+};
+
+const retryProfileOperation = async <T>(
+  operationName: string,
+  operation: () => Promise<T>,
+) => {
+  try {
+    return await operation();
+  } catch (error) {
+    console.warn(`Retrying local profile storage ${operationName}:`, error);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return operation();
+  }
+};
+
 export const openProfileStore = async (): Promise<ProfileStore> => {
-  const database = await openProfileDatabase();
+  let database: SQLite.SQLiteDatabase | null = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      database = await openProfileDatabase();
+      break;
+    } catch (error) {
+      console.error(
+        `Unable to initialize the local profile store (attempt ${attempt}/3):`,
+        error,
+      );
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 150));
+      }
+    }
+  }
+  if (!database) {
+    usingMemoryFallback = true;
+    console.error(
+      "Local profile storage is unavailable after three attempts; using in-memory data.",
+    );
+    return createMemoryProfileStore();
+  }
+  const initializedDatabase = database;
+  usingMemoryFallback = false;
   return {
+    get isMemoryFallback() {
+      return usingMemoryFallback;
+    },
     async getCountry() {
-      const saved =
-        await database.getFirstAsync<{ value: string }>(
-          "SELECT value FROM profile.profile_settings WHERE key = 'active_country'",
+      try {
+        const saved = await retryProfileOperation("country read", () =>
+          initializedDatabase.getFirstAsync<{ value: string }>(
+            "SELECT value FROM profile.profile_settings WHERE key = 'active_country'",
+          ),
         );
-      return saved ? (JSON.parse(saved.value) as StoredCountry) : null;
+        memoryCountry = saved ? (JSON.parse(saved.value) as StoredCountry) : null;
+        return memoryCountry;
+      } catch (error) {
+        reportProfileStorageFailure("country read", error);
+        return memoryCountry;
+      }
     },
     async setCountry(country) {
-      await database.runAsync(
-        `INSERT INTO profile.profile_settings (key, value)
+      memoryCountry = country;
+      try {
+        await retryProfileOperation("country write", () =>
+          initializedDatabase.runAsync(
+            `INSERT INTO profile.profile_settings (key, value)
          VALUES ('active_country', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-        JSON.stringify(country),
-      );
+            JSON.stringify(country),
+          ),
+        );
+      } catch (error) {
+        reportProfileStorageFailure("country write", error);
+      }
     },
-    getContacts() {
-      return database.getAllAsync<TrustedContact>(
-        "SELECT id, name, phone, position FROM profile.trusted_contacts ORDER BY position",
-      );
+    async getContacts() {
+      try {
+        memoryContacts = await retryProfileOperation("trusted contacts read", () =>
+          initializedDatabase.getAllAsync<TrustedContact>(
+            "SELECT id, name, phone, position FROM profile.trusted_contacts ORDER BY position",
+          ),
+        );
+        return [...memoryContacts];
+      } catch (error) {
+        reportProfileStorageFailure("trusted contacts read", error);
+        return [...memoryContacts];
+      }
     },
     async saveContact(contact) {
-      await database.runAsync(
-        `INSERT INTO profile.trusted_contacts (id, name, phone, position)
+      memoryContacts = memoryContacts.some((entry) => entry.id === contact.id)
+        ? memoryContacts.map((entry) => (entry.id === contact.id ? contact : entry))
+        : [...memoryContacts, contact];
+      try {
+        await retryProfileOperation("trusted contact write", () =>
+          initializedDatabase.runAsync(
+            `INSERT INTO profile.trusted_contacts (id, name, phone, position)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
            phone = excluded.phone,
            position = excluded.position`,
-        contact.id,
-        contact.name,
-        contact.phone,
-        contact.position,
-      );
+            contact.id,
+            contact.name,
+            contact.phone,
+            contact.position,
+          ),
+        );
+      } catch (error) {
+        reportProfileStorageFailure("trusted contact write", error);
+      }
     },
     async deleteContact(id, remainingContacts) {
-      await database.withExclusiveTransactionAsync(async (transaction) => {
-        await transaction.runAsync("DELETE FROM profile.trusted_contacts WHERE id = ?", id);
-        for (const contact of remainingContacts) {
-          await transaction.runAsync(
-            "UPDATE profile.trusted_contacts SET position = ? WHERE id = ?",
-            contact.position,
-            contact.id,
-          );
-        }
-      });
+      memoryContacts = remainingContacts.filter((entry) => entry.id !== id);
+      try {
+        await retryProfileOperation("trusted contact deletion", () =>
+          initializedDatabase.withExclusiveTransactionAsync(async (transaction) => {
+            await transaction.runAsync("DELETE FROM profile.trusted_contacts WHERE id = ?", id);
+            for (const contact of remainingContacts) {
+              await transaction.runAsync(
+                "UPDATE profile.trusted_contacts SET position = ? WHERE id = ?",
+                contact.position,
+                contact.id,
+              );
+            }
+          }),
+        );
+      } catch (error) {
+        reportProfileStorageFailure("trusted contact deletion", error);
+      }
     },
     async getPreferences() {
       let rows: { key: string; value: string }[];
       try {
-        rows = await database.getAllAsync<{ key: string; value: string }>(
-          "SELECT key, value FROM app_preferences",
+        rows = await retryProfileOperation("preference read", () =>
+          initializedDatabase.getAllAsync<{ key: string; value: string }>(
+            "SELECT key, value FROM app_preferences",
+          ),
         );
       } catch (error) {
-        console.warn("SQLite preferences are unavailable; using AsyncStorage.");
+        reportProfileStorageFailure("preference read", error);
         let fallback: string | null;
         try {
           const { default: AsyncStorage } = await import(
             "@react-native-async-storage/async-storage"
           );
           fallback = await AsyncStorage.getItem(PREFERENCES_FALLBACK_KEY);
-        } catch {
-          fallback = await SecureStore.getItemAsync(PREFERENCES_FALLBACK_KEY);
+        } catch (asyncStorageError) {
+          try {
+            fallback = await SecureStore.getItemAsync(PREFERENCES_FALLBACK_KEY);
+          } catch (secureStoreError) {
+            reportProfileStorageFailure("preference fallback read", {
+              sqliteError: error,
+              asyncStorageError,
+              secureStoreError,
+            });
+            return memoryPreferences;
+          }
         }
-        if (!fallback) return defaultPreferences();
+        if (!fallback) return memoryPreferences;
         try {
-          return normalizePreferences(JSON.parse(fallback));
-        } catch {
-          throw new Error("Les préférences locales enregistrées sont invalides.");
+          memoryPreferences = normalizePreferences(JSON.parse(fallback));
+          return memoryPreferences;
+        } catch (fallbackError) {
+          reportProfileStorageFailure("preference fallback read", fallbackError);
+          return memoryPreferences;
         }
       }
       const values = new Map(rows.map((row) => [row.key, row.value]));
-      return normalizePreferences({
+      memoryPreferences = normalizePreferences({
         theme: values.get("theme"),
         language: values.get("language"),
         sosNotificationsEnabled: values.get("sos_notifications") !== "false",
@@ -201,8 +335,10 @@ export const openProfileStore = async (): Promise<ProfileStore> => {
         voiceAssistantFloatingButton:
           values.get("voice_assistant_floating_button") === "true",
       });
+      return memoryPreferences;
     },
     async setPreferences(preferences) {
+      memoryPreferences = normalizePreferences(preferences);
       const entries: [string, string][] = [
         ["theme", preferences.theme],
         ["language", preferences.language],
@@ -214,19 +350,21 @@ export const openProfileStore = async (): Promise<ProfileStore> => {
         ],
       ];
       try {
-        await database.withExclusiveTransactionAsync(async (transaction) => {
-          for (const [key, value] of entries) {
-            await transaction.runAsync(
-              `INSERT INTO app_preferences (key, value)
+        await retryProfileOperation("preference write", () =>
+          initializedDatabase.withExclusiveTransactionAsync(async (transaction) => {
+            for (const [key, value] of entries) {
+              await transaction.runAsync(
+                `INSERT INTO app_preferences (key, value)
                VALUES (?, ?)
                ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-              key,
-              value,
-            );
-          }
-        });
+                key,
+                value,
+              );
+            }
+          }),
+        );
       } catch (error) {
-        console.warn("SQLite preferences are unavailable; using AsyncStorage.");
+        reportProfileStorageFailure("preference write", error);
         try {
           const { default: AsyncStorage } = await import(
             "@react-native-async-storage/async-storage"
@@ -235,24 +373,24 @@ export const openProfileStore = async (): Promise<ProfileStore> => {
             PREFERENCES_FALLBACK_KEY,
             JSON.stringify(preferences),
           );
-        } catch {
-          await SecureStore.setItemAsync(
-            PREFERENCES_FALLBACK_KEY,
-            JSON.stringify(preferences),
-          );
+        } catch (fallbackError) {
+          try {
+            await SecureStore.setItemAsync(
+              PREFERENCES_FALLBACK_KEY,
+              JSON.stringify(preferences),
+            );
+          } catch (secureStoreError) {
+            reportProfileStorageFailure("preference write", {
+              sqliteError: error,
+              asyncStorageError: fallbackError,
+              secureStoreError,
+            });
+          }
         }
       }
     },
   };
 };
-
-const defaultPreferences = (): AppPreferences => ({
-  theme: "system",
-  language: "fr",
-  sosNotificationsEnabled: true,
-  defaultRadiusKm: 3,
-  voiceAssistantFloatingButton: false,
-});
 
 const normalizePreferences = (value: unknown): AppPreferences => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -264,7 +402,9 @@ const normalizePreferences = (value: unknown): AppPreferences => {
     theme:
       preferences.theme === "dark" || preferences.theme === "system"
         ? preferences.theme
-        : "light",
+        : preferences.theme === "light"
+          ? "light"
+          : defaultPreferences().theme,
     language: preferences.language === "en" ? "en" : "fr",
     sosNotificationsEnabled: preferences.sosNotificationsEnabled !== false,
     defaultRadiusKm: radius === 10 || radius === 30 ? radius : 3,

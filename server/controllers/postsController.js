@@ -107,6 +107,28 @@ export const signMediaUpload = async (request, response, next) => {
   }
 };
 
+export const logMediaUploadFailure = (request, response) => {
+  const { media_type: mediaType, status, message } = request.body ?? {};
+  if (
+    !["image", "video"].includes(mediaType) ||
+    !(status === null || (Number.isInteger(status) && status >= 100 && status <= 599)) ||
+    typeof message !== "string" ||
+    message.trim().length === 0
+  ) {
+    return response.status(400).json({ error: "Détails d'erreur invalides." });
+  }
+  const safeMessage = message
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .slice(0, 500);
+  console.error("Cloudinary client upload failed:", {
+    userId: request.auth.userId,
+    resourceType: mediaType,
+    status,
+    message: safeMessage,
+  });
+  return response.status(204).end();
+};
+
 const getVerifiedAsset = async (userId, mediaPublicId, mediaType) => {
   if (
     typeof mediaPublicId !== "string" ||

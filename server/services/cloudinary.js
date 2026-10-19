@@ -50,7 +50,7 @@ export const createCloudinaryUploadSignature = (parameters) => {
         value !== null &&
         value !== "",
     )
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([key, value]) => `${key}=${value}`)
     .join("&");
   const signature = createHash("sha1")
