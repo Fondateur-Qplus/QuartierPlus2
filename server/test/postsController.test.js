@@ -172,6 +172,8 @@ test("client Cloudinary failures are logged with status and bounded message", (c
         media_type: "video",
         status: 400,
         message: "Invalid video\u0000format",
+        expected_public_id: `${USER_ID}_expected`,
+        received_public_id: `quartierplus/posts/${USER_ID}_received`,
       },
     },
     response,
@@ -187,6 +189,8 @@ test("client Cloudinary failures are logged with status and bounded message", (c
         resourceType: "video",
         status: 400,
         message: "Invalid video format",
+        expectedPublicId: `${USER_ID}_expected`,
+        receivedPublicId: `quartierplus/posts/${USER_ID}_received`,
       },
     ],
   ]);
@@ -237,6 +241,46 @@ test("photo publication verifies Cloudinary metadata and stores only rounded coo
   ]);
   assert.notEqual(insertValues[3], 12.345678);
   assert.notEqual(insertValues[4], -1.234567);
+});
+
+test("photo publication stores the returned folder-prefixed public ID and secure URL", async (context) => {
+  let insertValues;
+  const publicId = `quartierplus/posts/${USER_ID}_photo`;
+  const secureUrl =
+    "https://res.cloudinary.com/quartierplus-test/image/upload/photo.jpg";
+  context.mock.method(pool, "query", async () => ({
+    rowCount: 1,
+    rows: [VERIFIED_USER],
+  }));
+  const transaction = createTransactionClient({
+    query(statement, values) {
+      if (statement.includes("INSERT INTO posts")) insertValues = values;
+      return { rowCount: 0, rows: [] };
+    },
+  });
+  context.mock.method(pool, "connect", async () => transaction);
+  mockCloudinaryUpload(context, { public_id: publicId, secure_url: secureUrl });
+  const response = createResponse();
+
+  await createPost(
+    {
+      auth: { userId: USER_ID },
+      body: {
+        scope: "country",
+        media_type: "image",
+        media_public_id: publicId,
+        caption: "Bonjour",
+      },
+    },
+    response,
+    (error) => {
+      throw error;
+    },
+  );
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(insertValues[6], publicId);
+  assert.equal(insertValues[7], secureUrl);
 });
 
 test("text-only publication stores null media fields when upload is unavailable", async (context) => {

@@ -6,6 +6,7 @@ import {
   deleteCloudinaryAsset,
   hasGpsMetadata,
   getCloudinaryAsset,
+  isCloudinaryPublicIdOwnedByUser,
 } from "../services/cloudinary.js";
 
 const SCOPES = new Set(["neighborhood", "region", "country", "international"]);
@@ -108,7 +109,13 @@ export const signMediaUpload = async (request, response, next) => {
 };
 
 export const logMediaUploadFailure = (request, response) => {
-  const { media_type: mediaType, status, message } = request.body ?? {};
+  const {
+    media_type: mediaType,
+    status,
+    message,
+    expected_public_id: expectedPublicId,
+    received_public_id: receivedPublicId,
+  } = request.body ?? {};
   if (
     !["image", "video"].includes(mediaType) ||
     !(status === null || (Number.isInteger(status) && status >= 100 && status <= 599)) ||
@@ -125,6 +132,20 @@ export const logMediaUploadFailure = (request, response) => {
     resourceType: mediaType,
     status,
     message: safeMessage,
+    ...(typeof expectedPublicId === "string"
+      ? {
+          expectedPublicId: expectedPublicId
+            .replace(/[\u0000-\u001f\u007f]/g, " ")
+            .slice(0, 255),
+        }
+      : {}),
+    ...(typeof receivedPublicId === "string"
+      ? {
+          receivedPublicId: receivedPublicId
+            .replace(/[\u0000-\u001f\u007f]/g, " ")
+            .slice(0, 255),
+        }
+      : {}),
   });
   return response.status(204).end();
 };
@@ -133,7 +154,7 @@ const getVerifiedAsset = async (userId, mediaPublicId, mediaType) => {
   if (
     typeof mediaPublicId !== "string" ||
     mediaPublicId.length > 255 ||
-    !mediaPublicId.startsWith(`${userId}_`)
+    !isCloudinaryPublicIdOwnedByUser(userId, mediaPublicId)
   ) {
     return { error: "Le média téléversé ne vous appartient pas." };
   }

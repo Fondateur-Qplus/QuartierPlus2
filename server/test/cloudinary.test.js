@@ -14,6 +14,7 @@ const {
   createCloudinaryUploadSignature,
   getCloudinaryAsset,
   hasGpsMetadata,
+  isCloudinaryPublicIdOwnedByUser,
 } = await import("../services/cloudinary.js");
 
 test("Cloudinary upload signatures sort params and never return the secret", () => {
@@ -58,6 +59,22 @@ test("GPS EXIF metadata is detected for post-upload deletion", () => {
     true,
   );
   assert.equal(hasGpsMetadata({ Make: "Camera", Orientation: 1 }), false);
+});
+
+test("Cloudinary public IDs are owned only when bare or prefixed by the signed folder", () => {
+  assert.equal(isCloudinaryPublicIdOwnedByUser("user-123", "user-123_asset"), true);
+  assert.equal(
+    isCloudinaryPublicIdOwnedByUser(
+      "user-123",
+      "quartierplus/posts/user-123_asset",
+    ),
+    true,
+  );
+  assert.equal(
+    isCloudinaryPublicIdOwnedByUser("user-123", "other-folder/user-123_asset"),
+    false,
+  );
+  assert.equal(isCloudinaryPublicIdOwnedByUser("user-123", "other_asset"), false);
 });
 
 test("Cloudinary refusals are logged and returned with their exact reason", async () => {

@@ -124,10 +124,31 @@ const adminTestEmailToken = optional("ADMIN_TEST_EMAIL_TOKEN");
 const livekitApiKey = optionalUnquoted("LIVEKIT_API_KEY");
 const livekitApiSecret = optionalUnquoted("LIVEKIT_API_SECRET");
 const livekitUrl = optionalUnquoted("LIVEKIT_URL");
+const livekitApiKeyIssues = [];
+if (!livekitApiKey) {
+  livekitApiKeyIssues.push("is missing");
+} else {
+  if (!livekitApiKey.startsWith("AP_")) {
+    livekitApiKeyIssues.push("must start with the API prefix AP_");
+  }
+  if (livekitApiKey.length < 11) {
+    livekitApiKeyIssues.push(
+      "must be at least 11 characters long (AP_ plus at least 8 characters)",
+    );
+  }
+  if (!/^AP_[A-Za-z0-9_-]*$/.test(livekitApiKey)) {
+    livekitApiKeyIssues.push(
+      "must contain only ASCII letters, digits, underscores, or hyphens after AP_; internal spaces and unmatched quotes are not allowed",
+    );
+  }
+}
 const isPlaceholderLiveKitValue = (value) =>
   /(?:your[-_]|replace[-_]?with|fake|placeholder|changeme|example(?:\.|$))/i.test(
     value,
   );
+if (livekitApiKey && isPlaceholderLiveKitValue(livekitApiKey)) {
+  livekitApiKeyIssues.push("must not be an example or placeholder value");
+}
 const isValidLiveKitUrl = (value) => {
   if (!value || isPlaceholderLiveKitValue(value)) return false;
   try {
@@ -142,10 +163,7 @@ const isValidLiveKitUrl = (value) => {
   }
 };
 const livekitConfigurationProblems = [
-  !/^AP_[A-Za-z0-9_-]{8,}$/.test(livekitApiKey) ||
-  isPlaceholderLiveKitValue(livekitApiKey)
-    ? "LIVEKIT_API_KEY"
-    : null,
+  livekitApiKeyIssues.length > 0 ? "LIVEKIT_API_KEY" : null,
   livekitApiSecret.length < 32 || isPlaceholderLiveKitValue(livekitApiSecret)
     ? "LIVEKIT_API_SECRET"
     : null,
@@ -153,6 +171,21 @@ const livekitConfigurationProblems = [
     ? "LIVEKIT_URL"
     : null,
 ].filter((name) => name !== null);
+const livekitConfigurationProblemDetails = [
+  ...(livekitApiKeyIssues.length > 0
+    ? [`LIVEKIT_API_KEY ${livekitApiKeyIssues.join("; ")}.`]
+    : []),
+  ...(livekitApiSecret.length < 32 || isPlaceholderLiveKitValue(livekitApiSecret)
+    ? [
+        "LIVEKIT_API_SECRET must contain at least 32 characters and must not be an example or placeholder value.",
+      ]
+    : []),
+  ...(!isValidLiveKitUrl(livekitUrl)
+    ? [
+        "LIVEKIT_URL must be a valid ws:// or wss:// URL (wss:// is required in production).",
+      ]
+    : []),
+];
 const livekitConfigurationIsUsable = livekitConfigurationProblems.length === 0;
 if (isProduction) {
   if (!googleClientId) {
@@ -197,6 +230,7 @@ export const env = Object.freeze({
   livekitUrl,
   livekitConfigurationIsUsable,
   livekitConfigurationProblems,
+  livekitConfigurationProblemDetails,
   fedapaySecretKey: optional("FEDAPAY_SECRET_KEY"),
   fedapayPublicKey: optional("FEDAPAY_PUBLIC_KEY"),
   fedapayEnvironment,

@@ -25,12 +25,14 @@ jest.mock("./api", () => ({
 }));
 
 const axios = require("axios").default;
+const { apiFetch } = require("./api");
 const { uploadCloudinaryMedia } = require("./cloudinaryUpload");
 
 describe("Cloudinary signed uploads", () => {
   beforeEach(() => {
     axios.post.mockReset();
     axios.post.mockResolvedValue({ data: { public_id: "user_video" } });
+    apiFetch.mockClear();
   });
 
   it("sends large videos as chunks with identical signed parameters", async () => {
@@ -68,5 +70,79 @@ describe("Cloudinary signed uploads", () => {
     expect(axios.post.mock.calls.at(-1)[2].headers["Content-Range"]).toBe(
       "bytes 20971520-20971520/20971521",
     );
+  });
+
+  it("accepts and returns the public ID prefixed by the signed folder", async () => {
+    const signature = {
+      apiKey: "public-api-key",
+      cloudName: "test-cloud",
+      folder: "quartierplus/posts",
+      public_id: "user_photo",
+      resource_type: "video",
+      signature: "signed-value",
+      timestamp: 123,
+    };
+    const secureUrl = "https://res.cloudinary.com/test-cloud/video/upload/video.mp4";
+    axios.post.mockResolvedValue({
+      data: {
+        public_id: "quartierplus/posts/user_photo",
+        secure_url: secureUrl,
+      },
+    });
+
+    await expect(
+      uploadCloudinaryMedia(signature, {
+        uri: "file:///photo.jpg",
+        name: "photo.mp4",
+        type: "video/mp4",
+        size: 20 * 1024 * 1024 + 1,
+      }),
+    ).resolves.toEqual({
+      publicId: "quartierplus/posts/user_photo",
+      secureUrl,
+    });
+  });
+
+  it("logs and reports expected and received IDs when Cloudinary returns an invalid ID", async () => {
+    const signature = {
+      apiKey: "public-api-key",
+      cloudName: "test-cloud",
+      folder: "quartierplus/posts",
+      public_id: "user_video",
+      resource_type: "video",
+      signature: "signed-value",
+      timestamp: 123,
+    };
+    axios.post.mockResolvedValue({ data: { public_id: "unexpected_id" } });
+    const consoleError = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    try {
+      await expect(
+        uploadCloudinaryMedia(signature, {
+          uri: "file:///video.mp4",
+          name: "video.mp4",
+          type: "video/mp4",
+          size: 20 * 1024 * 1024 + 1,
+        }),
+      ).rejects.toThrow("identifiant public inattendu");
+
+      expect(consoleError).toHaveBeenCalledWith(
+        "Cloudinary upload failed:",
+        expect.objectContaining({
+          expectedPublicId: "user_video",
+          receivedPublicId: "unexpected_id",
+        }),
+      );
+      expect(JSON.parse(apiFetch.mock.calls[0][1].body)).toEqual(
+        expect.objectContaining({
+          expected_public_id: "user_video",
+          received_public_id: "unexpected_id",
+        }),
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

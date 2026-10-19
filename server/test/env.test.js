@@ -151,6 +151,32 @@ test("production environment marks placeholder LiveKit credentials unavailable",
   assert.match(result.stdout, /LIVEKIT_API_KEY/);
 });
 
+test("LiveKit API key diagnostics identify format failures without exposing the key", () => {
+  const invalidKey = "bad key";
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      "import { env } from './config/env.js'; console.log(JSON.stringify(env.livekitConfigurationProblemDetails))",
+    ],
+    {
+      cwd: serverDirectory,
+      env: {
+        ...productionEnv,
+        LIVEKIT_API_KEY: invalidKey,
+        DOTENV_CONFIG_PATH: "/dev/null",
+      },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /must start with the API prefix AP_/);
+  assert.match(result.stdout, /at least 11 characters/);
+  assert.match(result.stdout, /internal spaces and unmatched quotes are not allowed/);
+  assert.equal(result.stdout.includes(invalidKey), false);
+});
+
 test("production environment remains available with partial Cloudinary settings", () => {
   const result = loadProductionConfig({
     CLOUDINARY_CLOUD_NAME: "quartierplus",

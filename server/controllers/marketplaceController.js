@@ -4,6 +4,7 @@ import {
   deleteCloudinaryAsset,
   getCloudinaryAsset,
   hasGpsMetadata,
+  isCloudinaryPublicIdOwnedByUser,
 } from "../services/cloudinary.js";
 
 const ITEM_TYPES = new Set(["listing", "local", "service"]);
@@ -12,7 +13,7 @@ const validateImage = async (userId, publicId) => {
   if (
     typeof publicId !== "string" ||
     publicId.length > 255 ||
-    !publicId.startsWith(`${userId}_`)
+    !isCloudinaryPublicIdOwnedByUser(userId, publicId)
   ) {
     return { error: "La photo téléversée ne vous appartient pas." };
   }

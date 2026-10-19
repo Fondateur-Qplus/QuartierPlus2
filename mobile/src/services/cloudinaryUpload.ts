@@ -79,6 +79,8 @@ export const reportCloudinaryUploadFailure = async (
   mediaType: CloudinaryMediaType,
   status: number | null,
   message: string,
+  expectedPublicId: string,
+  receivedPublicId: string | null,
 ) => {
   if (!API_BASE_URL) {
     console.error("Unable to report Cloudinary upload failure: API URL is missing.");
@@ -92,6 +94,8 @@ export const reportCloudinaryUploadFailure = async (
         media_type: mediaType,
         status,
         message: message.slice(0, 500),
+        expected_public_id: expectedPublicId,
+        received_public_id: receivedPublicId,
       }),
     });
     if (!response.ok) {
@@ -113,9 +117,9 @@ export const uploadCloudinaryMedia = async (
     throw new Error("Type de ressource Cloudinary invalide.");
   }
   const uploadUrl = `https://api.cloudinary.com/v1_1/${signature.cloudName}/${signature.resource_type}/upload`;
+  let result: { public_id?: string; secure_url?: string } | undefined;
   try {
     const size = file.size || new File(file.uri).size;
-    let result: { public_id?: string; secure_url?: string } | undefined;
     if (
       signature.resource_type === "video" &&
       size > LARGE_VIDEO_THRESHOLD
@@ -165,11 +169,20 @@ export const uploadCloudinaryMedia = async (
       );
       result = response.data;
     }
-    if (result?.public_id !== signature.public_id) {
+    const expectedPublicId = signature.public_id;
+    const receivedPublicId = result?.public_id;
+    const folderPrefix = `${signature.folder.replace(/\/+$/, "")}/`;
+    if (!result || typeof receivedPublicId !== "string" || !receivedPublicId) {
+      throw new Error("Cloudinary n'a pas renvoyé d'identifiant public.");
+    }
+    if (
+      receivedPublicId !== expectedPublicId &&
+      receivedPublicId !== `${folderPrefix}${expectedPublicId}`
+    ) {
       throw new Error("Cloudinary a renvoyé un identifiant public inattendu.");
     }
     return {
-      publicId: result.public_id,
+      publicId: receivedPublicId,
       ...(typeof result.secure_url === "string"
         ? { secureUrl: result.secure_url }
         : {}),
@@ -183,6 +196,8 @@ export const uploadCloudinaryMedia = async (
       `Type de ressource : ${signature.resource_type}`,
       `Timestamp signé : ${signature.timestamp}`,
       "Paramètres signés : folder, public_id, timestamp",
+      `public_id attendu : ${signature.public_id}`,
+      `public_id reçu : ${result?.public_id ?? "absent"}`,
       `Statut HTTP : ${status ?? "indisponible"}`,
       `Message Cloudinary : ${message}`,
     ].join("\n");
@@ -190,11 +205,15 @@ export const uploadCloudinaryMedia = async (
       resourceType: signature.resource_type,
       status: status ?? null,
       message,
+      expectedPublicId: signature.public_id,
+      receivedPublicId: result?.public_id ?? null,
     });
     await reportCloudinaryUploadFailure(
       signature.resource_type,
       status ?? null,
       message,
+      signature.public_id,
+      result?.public_id ?? null,
     );
     throw new MediaUploadError(
       status

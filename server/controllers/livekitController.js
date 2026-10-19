@@ -24,8 +24,9 @@ export const createLiveKitToken = async (request, response) => {
   }
   if (!env.livekitConfigurationIsUsable) {
     const details = env.livekitConfigurationProblems.join(", ");
+    const diagnostic = env.livekitConfigurationProblemDetails.join(" ");
     console.error(
-      `LiveKit is unavailable; missing or invalid configuration: ${details}.`,
+      `LiveKit is unavailable; missing or invalid configuration: ${diagnostic}`,
     );
     return response.status(503).json({
       error:

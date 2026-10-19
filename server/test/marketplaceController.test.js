@@ -100,7 +100,7 @@ test("marketplace accepts a free WebP listing with a French category and descrip
     status: 200,
     async json() {
       return {
-        public_id: `${USER_ID}_photo`,
+        public_id: `quartierplus/posts/${USER_ID}_photo`,
         secure_url:
           "https://res.cloudinary.com/quartierplus-test/image/upload/photo.webp",
         format: "webp",
@@ -122,7 +122,7 @@ test("marketplace accepts a free WebP listing with a French category and descrip
         price: 0,
         currency: "FCFA",
         location: { latitude: 12.345, longitude: -1.234 },
-        media_public_id: `${USER_ID}_photo`,
+        media_public_id: `quartierplus/posts/${USER_ID}_photo`,
       },
     },
     response,

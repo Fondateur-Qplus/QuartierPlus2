@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { env } from "../config/env.js";
 
+const POSTS_FOLDER = "quartierplus/posts";
+
+export const isCloudinaryPublicIdOwnedByUser = (userId, publicId) =>
+  typeof publicId === "string" &&
+  (publicId.startsWith(`${userId}_`) ||
+    publicId.startsWith(`${POSTS_FOLDER}/${userId}_`));
+
 const requireCloudinaryConfiguration = () => {
   const missingVariables = [
     ["CLOUDINARY_CLOUD_NAME", env.cloudinaryCloudName],
