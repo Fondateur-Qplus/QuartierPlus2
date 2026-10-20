@@ -61,7 +61,7 @@ test("GPS EXIF metadata is detected for post-upload deletion", () => {
   assert.equal(hasGpsMetadata({ Make: "Camera", Orientation: 1 }), false);
 });
 
-test("Cloudinary public IDs are owned only when bare or prefixed by the signed folder", () => {
+test("Cloudinary public IDs may use dynamic folders but must retain the user's ID prefix", () => {
   assert.equal(isCloudinaryPublicIdOwnedByUser("user-123", "user-123_asset"), true);
   assert.equal(
     isCloudinaryPublicIdOwnedByUser(
@@ -70,10 +70,8 @@ test("Cloudinary public IDs are owned only when bare or prefixed by the signed f
     ),
     true,
   );
-  assert.equal(
-    isCloudinaryPublicIdOwnedByUser("user-123", "other-folder/user-123_asset"),
-    false,
-  );
+  assert.equal(isCloudinaryPublicIdOwnedByUser("user-123", "dynamic-folder/user-123_asset"), true);
+  assert.equal(isCloudinaryPublicIdOwnedByUser("user-123", "dynamic-folder/other_asset"), false);
   assert.equal(isCloudinaryPublicIdOwnedByUser("user-123", "other_asset"), false);
 });
 

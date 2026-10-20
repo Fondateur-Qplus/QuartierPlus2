@@ -128,17 +128,9 @@ const livekitApiKeyIssues = [];
 if (!livekitApiKey) {
   livekitApiKeyIssues.push("is missing");
 } else {
-  if (!livekitApiKey.startsWith("AP_")) {
-    livekitApiKeyIssues.push("must start with the API prefix AP_");
-  }
-  if (livekitApiKey.length < 11) {
+  if (!/^API[A-Za-z0-9_-]+$/.test(livekitApiKey)) {
     livekitApiKeyIssues.push(
-      "must be at least 11 characters long (AP_ plus at least 8 characters)",
-    );
-  }
-  if (!/^AP_[A-Za-z0-9_-]*$/.test(livekitApiKey)) {
-    livekitApiKeyIssues.push(
-      "must contain only ASCII letters, digits, underscores, or hyphens after AP_; internal spaces and unmatched quotes are not allowed",
+      "must match /^API[A-Za-z0-9_-]+$/ after trimming and removing surrounding quotes",
     );
   }
 }
@@ -154,9 +146,8 @@ const isValidLiveKitUrl = (value) => {
   try {
     const parsed = new URL(value);
     return (
-      ["wss:", "ws:"].includes(parsed.protocol) &&
-      Boolean(parsed.hostname) &&
-      (!isProduction || parsed.protocol === "wss:")
+      parsed.protocol === "wss:" &&
+      Boolean(parsed.hostname)
     );
   } catch {
     return false;
@@ -182,7 +173,7 @@ const livekitConfigurationProblemDetails = [
     : []),
   ...(!isValidLiveKitUrl(livekitUrl)
     ? [
-        "LIVEKIT_URL must be a valid ws:// or wss:// URL (wss:// is required in production).",
+        "LIVEKIT_URL must be a valid wss:// URL.",
       ]
     : []),
 ];

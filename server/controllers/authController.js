@@ -90,10 +90,20 @@ export const listCountries = async (_request, response, next) => {
   }
 };
 
-const googleVerificationFailure = (error) =>
-  Object.assign(new Error("La vérification auprès de Google a échoué."), {
-    status: error.response?.status === 400 ? 401 : 502,
+const googleVerificationFailure = (error) => {
+  const invalidCredential = error?.response?.status === 400;
+  const code = invalidCredential
+    ? "GOOGLE_TOKEN_INVALID"
+    : "GOOGLE_VERIFICATION_FAILED";
+  const message = invalidCredential
+    ? "Google a refusé le jeton d'identité."
+    : "Google n'a pas pu vérifier le jeton.";
+  return Object.assign(new Error(message), {
+    status: invalidCredential ? 401 : 502,
+    code,
+    reason: `${message} Vérifiez EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID, GOOGLE_CLIENT_ID et les clients OAuth autorisés (code ${code}).`,
   });
+};
 
 export const requestOtp = async (request, response, next) => {
   const flow = request.body?.flow === "register" ? "register" : "login";
@@ -657,6 +667,8 @@ const verifyGoogleCredential = async (credential, tokenType) => {
   if (env.googleClientIds.length === 0) {
     throw Object.assign(new Error("La connexion Google n'est pas configurée."), {
       status: 503,
+      code: "GOOGLE_CLIENT_ID_MISSING",
+      reason: "GOOGLE_CLIENT_ID et GOOGLE_CLIENT_IDS sont absents (code GOOGLE_CLIENT_ID_MISSING).",
     });
   }
   if (tokenType !== "access_token" && credential.split(".").length === 3) {
@@ -675,7 +687,11 @@ const verifyGoogleCredential = async (credential, tokenType) => {
       !payload.email ||
       payload.email_verified !== true
     ) {
-      throw Object.assign(new Error("Jeton Google invalide."), { status: 401 });
+      throw Object.assign(new Error("Le profil Google ne contient pas un e-mail vérifié."), {
+        status: 401,
+        code: "GOOGLE_PROFILE_INCOMPLETE",
+        reason: "Google n'a pas fourni un identifiant et un e-mail vérifié (code GOOGLE_PROFILE_INCOMPLETE).",
+      });
     }
     return {
       googleId: payload.sub,
@@ -691,14 +707,22 @@ const verifyGoogleCredential = async (credential, tokenType) => {
     throw googleVerificationFailure(error);
   }
   if (!env.googleClientIds.includes(tokenInfo.aud)) {
-    throw Object.assign(new Error("Jeton Google invalide."), { status: 401 });
+    throw Object.assign(new Error("Jeton Google invalide."), {
+      status: 401,
+      code: "GOOGLE_AUDIENCE_MISMATCH",
+      reason: "L'audience du jeton ne correspond pas à GOOGLE_CLIENT_ID/GOOGLE_CLIENT_IDS (code GOOGLE_AUDIENCE_MISMATCH).",
+    });
   }
   const userInfoResponse = await fetch(
     "https://openidconnect.googleapis.com/v1/userinfo",
     { headers: { Authorization: `Bearer ${credential}` } },
   );
   if (!userInfoResponse.ok) {
-    throw Object.assign(new Error("Jeton Google invalide."), { status: 401 });
+    throw Object.assign(new Error("Jeton Google invalide."), {
+      status: 401,
+      code: "GOOGLE_USERINFO_REJECTED",
+      reason: `L'API Google UserInfo a répondu HTTP ${userInfoResponse.status} (code GOOGLE_USERINFO_REJECTED).`,
+    });
   }
   const userInfo = await userInfoResponse.json();
   if (
@@ -706,7 +730,11 @@ const verifyGoogleCredential = async (credential, tokenType) => {
     typeof userInfo.email !== "string" ||
     userInfo.email_verified !== true
   ) {
-    throw Object.assign(new Error("Jeton Google invalide."), { status: 401 });
+    throw Object.assign(new Error("Jeton Google invalide."), {
+      status: 401,
+      code: "GOOGLE_PROFILE_INCOMPLETE",
+      reason: "Google UserInfo n'a pas renvoyé un identifiant et un e-mail vérifié (code GOOGLE_PROFILE_INCOMPLETE).",
+    });
   }
   return {
     googleId: userInfo.sub,
@@ -731,7 +759,11 @@ export const googleAuth = async (request, response, next) => {
         ? "access_token"
         : undefined;
   if (!credential || credential.length > 8192) {
-    return response.status(400).json({ error: "Jeton Google manquant ou invalide." });
+    return response.status(400).json({
+      error: "Jeton Google manquant ou invalide.",
+      code: "GOOGLE_CREDENTIAL_INVALID",
+      reason: "Aucun jeton Google valide n'a été reçu (code GOOGLE_CREDENTIAL_INVALID).",
+    });
   }
 
   try {

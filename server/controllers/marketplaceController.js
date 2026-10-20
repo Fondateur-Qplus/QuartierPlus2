@@ -19,6 +19,10 @@ const validateImage = async (userId, publicId) => {
   }
   const image = await getCloudinaryAsset("image", publicId);
   if (!image || image.public_id !== publicId) {
+    console.error("Cloudinary public ID mismatch:", {
+      expectedPublicId: publicId,
+      receivedPublicId: image?.public_id ?? null,
+    });
     return { error: "La photo téléversée est introuvable." };
   }
   if (hasGpsMetadata(image.image_metadata)) {

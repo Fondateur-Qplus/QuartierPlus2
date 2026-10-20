@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { pool } from "../db/pool.js";
 import { env } from "../config/env.js";
 import {
@@ -275,20 +275,39 @@ export const listSponsoredPins = async (request, response, next) => {
 };
 
 export const handleFedaPayWebhook = async (request, response, next) => {
-  const suppliedSecret = request.get("x-fedapay-webhook-secret") ?? "";
   const expectedSecret = env.fedapayWebhookSecret;
   if (!expectedSecret) {
     return response.status(503).json({
-      error: "Le secret du webhook FedaPay n'est pas configuré.",
+      error: "Le webhook FedaPay n'est pas configuré.",
+      code: "FEDAPAY_WEBHOOK_SECRET_MISSING",
+      reason: "Variable FEDAPAY_WEBHOOK_SECRET manquante (code FEDAPAY_WEBHOOK_SECRET_MISSING).",
     });
   }
-  const suppliedBytes = Buffer.from(suppliedSecret);
-  const expectedBytes = Buffer.from(expectedSecret);
+  if (!Buffer.isBuffer(request.rawBody)) {
+    return response.status(400).json({
+      error: "Le corps brut du webhook FedaPay est absent.",
+      code: "FEDAPAY_RAW_BODY_MISSING",
+      reason: "Le middleware JSON n'a pas conservé le corps brut (code FEDAPAY_RAW_BODY_MISSING).",
+    });
+  }
+  const suppliedSignature = (request.get("x-fedapay-signature") ?? "")
+    .replace(/^sha256=/i, "")
+    .trim();
+  const expectedSignature = createHmac("sha256", expectedSecret)
+    .update(request.rawBody)
+    .digest("hex");
+  const suppliedBytes = Buffer.from(suppliedSignature, "hex");
+  const expectedBytes = Buffer.from(expectedSignature, "hex");
   if (
+    !/^[a-f0-9]{64}$/i.test(suppliedSignature) ||
     suppliedBytes.length !== expectedBytes.length ||
     !timingSafeEqual(suppliedBytes, expectedBytes)
   ) {
-    return response.status(401).json({ error: "Webhook FedaPay non autorisé." });
+    return response.status(401).json({
+      error: "Signature du webhook FedaPay invalide.",
+      code: "FEDAPAY_SIGNATURE_INVALID",
+      reason: "La signature HMAC-SHA256 ne correspond pas au corps brut (code FEDAPAY_SIGNATURE_INVALID).",
+    });
   }
 
   const event = request.body?.name ?? request.body?.event;

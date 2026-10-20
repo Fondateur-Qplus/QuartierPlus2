@@ -47,13 +47,13 @@ export const uploadMarketplaceImage = async (
     payload.resource_type !== "image"
   ) {
     const message =
-      isRecord(payload) && typeof payload.error === "string"
-        ? payload.error
-        : "Impossible de préparer la photo de l'annonce.";
+      isRecord(payload) && typeof payload.reason === "string"
+        ? payload.reason
+        : isRecord(payload) && typeof payload.error === "string"
+          ? payload.error
+          : "Impossible de préparer la photo de l'annonce.";
     throw new MediaUploadError(
-      message.startsWith("Le téléversement média n'est pas configuré")
-        ? message
-        : "Le serveur n'a pas pu préparer le téléversement de la photo.",
+      message,
       `Étape : signature\nURL de signature : ${API_BASE_URL}/v1/media/sign\nStatut HTTP : ${response.status}\nMessage : ${message}`,
     );
   }

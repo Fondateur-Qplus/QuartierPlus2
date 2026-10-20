@@ -800,10 +800,16 @@ export default function MessagesScreen() {
           body: JSON.stringify({ room: selectedChannelId }),
           signal: controller.signal,
         });
-        if (!response.ok) {
-          throw new Error(`Jeton LiveKit indisponible (HTTP ${response.status}).`);
-        }
         const payload: unknown = await response.json();
+        if (!response.ok) {
+          throw new Error(
+            isRecord(payload) && typeof payload.reason === "string"
+              ? payload.reason
+              : isRecord(payload) && typeof payload.error === "string"
+                ? payload.error
+                : `Impossible d'obtenir un jeton LiveKit (HTTP ${response.status}, code LIVEKIT_TOKEN_HTTP_${response.status}).`,
+          );
+        }
         const token =
           isRecord(payload) && typeof payload.token === "string"
             ? payload.token
@@ -853,9 +859,13 @@ export default function MessagesScreen() {
   const openPtt = () => {
     if (selectedChannelId !== "emergency") return;
     setIsPttVisible(true);
-    void ensureLiveKitRoom().catch(() =>
-      setPttError("Talkie-walkie indisponible"),
-    );
+    void ensureLiveKitRoom().catch((error: unknown) => {
+      setPttError(
+        error instanceof Error
+          ? error.message
+          : "Connexion LiveKit échouée (code LIVEKIT_CONNECTION_FAILED).",
+      );
+    });
   };
 
   const startTalking = async () => {
@@ -865,9 +875,13 @@ export default function MessagesScreen() {
       if (!pttPressedRef.current) return;
       await room.localParticipant.setMicrophoneEnabled(true);
       if (pttPressedRef.current) setIsTalking(true);
-    } catch {
+    } catch (error) {
       pttPressedRef.current = false;
-      setPttError("Talkie-walkie indisponible");
+      setPttError(
+        error instanceof Error
+          ? error.message
+          : "Connexion LiveKit échouée (code LIVEKIT_CONNECTION_FAILED).",
+      );
     }
   };
 

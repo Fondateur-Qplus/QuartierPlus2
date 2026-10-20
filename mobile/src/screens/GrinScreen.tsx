@@ -33,7 +33,12 @@ import {
 } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
-import { API_BASE_URL, apiFetch, getStoredAuthToken } from "../services/api";
+import {
+  API_BASE_URL,
+  apiFetch,
+  getStoredAuthToken,
+  type ApiFetchResponse,
+} from "../services/api";
 import { enterGrinPictureInPicture } from "../services/grinPictureInPicture";
 
 type CameraTrackReference = {
@@ -54,7 +59,35 @@ type GrinChair = {
 
 const MAX_CHAIRS = 6;
 const LIVEKIT_UNAVAILABLE_MESSAGE =
-  "Service vidéo/voix en cours d'activation";
+  "Connexion au Grin impossible.";
+
+const formatLiveKitError = (error: unknown) => {
+  if (!(error instanceof Error)) return LIVEKIT_UNAVAILABLE_MESSAGE;
+  if (/\(code [A-Z0-9_-]+\)/i.test(error.message)) return error.message;
+  const record = error as Error & { code?: string | number };
+  const code =
+    typeof record.code === "string" || typeof record.code === "number"
+      ? String(record.code)
+      : "LIVEKIT_CONNECTION_FAILED";
+  return `${error.message} (code ${code}).`;
+};
+
+const readServerReason = async (response: ApiFetchResponse) => {
+  try {
+    const payload: unknown = await response.json();
+    if (payload && typeof payload === "object") {
+      const data = payload as Record<string, unknown>;
+      if (typeof data.reason === "string") return data.reason;
+      if (typeof data.error === "string") {
+        const code = typeof data.code === "string" ? data.code : `HTTP_${response.status}`;
+        return `${data.error} (code ${code}).`;
+      }
+    }
+  } catch {
+    return `Réponse LiveKit illisible (code HTTP_${response.status}).`;
+  }
+  return `Le serveur LiveKit a répondu HTTP ${response.status} (code HTTP_${response.status}).`;
+};
 
 const readChairs = (room: Room): GrinChair[] => {
   const participants = [
@@ -119,8 +152,12 @@ export default function GrinScreen() {
   const connect = useCallback(async (): Promise<Room> => {
     if (roomRef.current?.state === "connected") return roomRef.current;
     if (connectionRef.current) return connectionRef.current;
-    if (!API_BASE_URL) throw new Error("L'adresse API n'est pas configurée.");
-    if (isOffline) throw new Error("Le Grin nécessite une connexion Internet.");
+    if (!API_BASE_URL) {
+      throw new Error("EXPO_PUBLIC_API_URL manquant (code API_URL_MISSING).");
+    }
+    if (isOffline) {
+      throw new Error("Le Grin nécessite une connexion Internet (code LIVEKIT_NETWORK_OFFLINE).");
+    }
 
     const pending = (async () => {
       setIsConnecting(true);
@@ -138,7 +175,7 @@ export default function GrinScreen() {
           body: JSON.stringify({ roomName: "grin" }),
         });
         if (!response.ok) {
-          throw new Error(LIVEKIT_UNAVAILABLE_MESSAGE);
+          throw new Error(await readServerReason(response));
         }
         const payload: unknown = await response.json();
         if (
@@ -149,7 +186,7 @@ export default function GrinScreen() {
           !("url" in payload) ||
           typeof payload.url !== "string"
         ) {
-          throw new Error(LIVEKIT_UNAVAILABLE_MESSAGE);
+          throw new Error("Réponse du serveur LiveKit invalide (code LIVEKIT_RESPONSE_INVALID).");
         }
 
         await AudioSession.startAudioSession();
@@ -222,12 +259,7 @@ export default function GrinScreen() {
     }
     void connect().catch((connectError: unknown) => {
       if (!mountedRef.current) return;
-      setError(
-        connectError instanceof Error &&
-          /connectez-vous|connexion internet/i.test(connectError.message)
-          ? connectError.message
-          : LIVEKIT_UNAVAILABLE_MESSAGE,
-      );
+      setError(formatLiveKitError(connectError));
     });
     return () => {
       mountedRef.current = false;
@@ -262,14 +294,7 @@ export default function GrinScreen() {
       setIsMicrophoneEnabled(true);
       setError(null);
     } catch (joinError) {
-      setError(
-        joinError instanceof Error
-          && /six chaises|autorisez la caméra et le microphone/i.test(
-            joinError.message,
-          )
-          ? joinError.message
-          : LIVEKIT_UNAVAILABLE_MESSAGE,
-      );
+      setError(formatLiveKitError(joinError));
     }
   };
 
@@ -322,7 +347,9 @@ export default function GrinScreen() {
   };
 
   const retryConnection = () => {
-    void connect().catch(() => setError(LIVEKIT_UNAVAILABLE_MESSAGE));
+    void connect().catch((connectError: unknown) =>
+      setError(formatLiveKitError(connectError)),
+    );
   };
 
   const togglePictureInPicture = () => {

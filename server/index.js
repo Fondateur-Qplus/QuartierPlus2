@@ -25,12 +25,18 @@ import { attachSocketServer } from "./sockets/index.js";
 import { handleHealth } from "./health.js";
 import { ensureDefaultChannels } from "./services/defaultChannels.js";
 import { verifySmtpTransport } from "./services/email.js";
+import { captureFedaPayRawBody } from "./middlewares/fedapayRawBody.js";
 
 const app = express();
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
-app.use(express.json({ limit: "32kb" }));
+app.use(
+  express.json({
+    limit: "32kb",
+    verify: captureFedaPayRawBody,
+  }),
+);
 app.get("/health", handleHealth);
 app.get(
   ["/api/v1/monetization/config", "/v1/monetization/config"],
@@ -55,16 +61,54 @@ app.use(["/api/v1/tickets", "/v1/tickets"], ticketsRoutes);
 app.use(["/api/v1/users", "/v1/users"], userRoutes);
 app.use(["/api/v1/admin", "/v1/admin"], adminRoutes);
 app.use((error, _request, response, _next) => {
-  console.error("Unhandled API error:", error);
   const status =
     Number.isInteger(error.status) && error.status >= 400 && error.status < 600
       ? error.status
       : 500;
+  const code =
+    typeof error.code === "string"
+      ? error.code
+      : `HTTP_${status}`;
+  const reason =
+    typeof error.reason === "string"
+      ? error.reason
+      : status === 500
+        ? "Une erreur interne est survenue."
+        : `${error.message} (code ${code}).`;
+  const redact = (value) => {
+    let safe = value;
+    for (const secret of [
+      env.jwtSecret,
+      env.databaseUrl,
+      env.ticketQrSecret,
+      env.smsDeliveryToken,
+      env.smtpPass,
+      env.emailApiKey,
+      env.adminTestEmailToken,
+      env.fedapaySecretKey,
+      env.fedapayPublicKey,
+      env.fedapayWebhookSecret,
+      env.cloudinaryApiKey,
+      env.cloudinaryApiSecret,
+      env.livekitApiKey,
+      env.livekitApiSecret,
+    ]) {
+      if (secret) safe = safe.replaceAll(secret, "[masqué]");
+    }
+    return safe;
+  };
+  console.error("Unhandled API error:", {
+    status,
+    code,
+    reason: redact(reason),
+  });
   return response.status(status).json({
     error:
       status === 500
         ? "Une erreur interne est survenue."
-        : error.message,
+        : redact(error.message),
+    code,
+    reason: redact(reason),
   });
 });
 

@@ -21,7 +21,35 @@ type ActiveSpeaker = {
 };
 
 const TALKIE_WALKIE_UNAVAILABLE =
-  "Service indisponible";
+  "Connexion au talkie-walkie impossible.";
+
+const formatLiveKitError = (error: unknown) => {
+  if (!(error instanceof Error)) return TALKIE_WALKIE_UNAVAILABLE;
+  if (/\(code [A-Z0-9_-]+\)/i.test(error.message)) return error.message;
+  const record = error as Error & { code?: string | number };
+  const code =
+    typeof record.code === "string" || typeof record.code === "number"
+      ? String(record.code)
+      : "LIVEKIT_CONNECTION_FAILED";
+  return `${error.message} (code ${code}).`;
+};
+
+const readServerReason = async (response: Awaited<ReturnType<typeof apiFetch>>) => {
+  try {
+    const payload: unknown = await response.json();
+    if (payload && typeof payload === "object") {
+      const data = payload as Record<string, unknown>;
+      if (typeof data.reason === "string") return data.reason;
+      if (typeof data.error === "string") {
+        const code = typeof data.code === "string" ? data.code : `HTTP_${response.status}`;
+        return `${data.error} (code ${code}).`;
+      }
+    }
+  } catch {
+    return `Réponse LiveKit illisible (code HTTP_${response.status}).`;
+  }
+  return `Le serveur LiveKit a répondu HTTP ${response.status} (code HTTP_${response.status}).`;
+};
 
 const speakerLabel = (participant: Participant): ActiveSpeaker => ({
   identity: participant.identity,
@@ -44,8 +72,11 @@ export default function WalkieTalkieScreen() {
   const connect = useCallback(async (): Promise<Room> => {
     if (roomRef.current?.state === "connected") return roomRef.current;
     if (connectPromiseRef.current) return connectPromiseRef.current;
-    if (!API_BASE_URL || isOffline) {
-      throw new Error(TALKIE_WALKIE_UNAVAILABLE);
+    if (!API_BASE_URL) {
+      throw new Error("EXPO_PUBLIC_API_URL manquant (code API_URL_MISSING).");
+    }
+    if (isOffline) {
+      throw new Error("Connexion Internet requise (code LIVEKIT_NETWORK_OFFLINE).");
     }
 
     const pending = (async () => {
@@ -61,7 +92,7 @@ export default function WalkieTalkieScreen() {
           body: JSON.stringify({ room: "emergency" }),
         });
         if (!response.ok) {
-          throw new Error(TALKIE_WALKIE_UNAVAILABLE);
+          throw new Error(await readServerReason(response));
         }
         const payload: unknown = await response.json();
         if (
@@ -72,7 +103,7 @@ export default function WalkieTalkieScreen() {
           !("url" in payload) ||
           typeof payload.url !== "string"
         ) {
-          throw new Error(TALKIE_WALKIE_UNAVAILABLE);
+          throw new Error("Réponse du serveur LiveKit invalide (code LIVEKIT_RESPONSE_INVALID).");
         }
         await AudioSession.startAudioSession();
         const room = new Room();
@@ -121,7 +152,11 @@ export default function WalkieTalkieScreen() {
         mountedRef.current = false;
       };
     }
-    void connect().catch(() => setError(TALKIE_WALKIE_UNAVAILABLE));
+    void connect().catch((connectError: unknown) => {
+      if (mountedRef.current) {
+        setError(formatLiveKitError(connectError));
+      }
+    });
     return () => {
       mountedRef.current = false;
       pressedRef.current = false;
@@ -140,7 +175,7 @@ export default function WalkieTalkieScreen() {
     try {
       const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
-        throw new Error("L’accès au microphone est nécessaire pour parler.");
+        throw new Error("L’accès au microphone est nécessaire pour parler (code MICROPHONE_PERMISSION_DENIED).");
       }
       const room = await connect();
       if (!pressedRef.current) return;
@@ -148,12 +183,7 @@ export default function WalkieTalkieScreen() {
       if (pressedRef.current) setIsTalking(true);
     } catch (talkError) {
       pressedRef.current = false;
-      setError(
-        talkError instanceof Error &&
-          talkError.message.startsWith("L’accès au microphone")
-          ? talkError.message
-          : TALKIE_WALKIE_UNAVAILABLE,
-      );
+      setError(formatLiveKitError(talkError));
     }
   };
 
@@ -164,12 +194,16 @@ export default function WalkieTalkieScreen() {
     if (room) {
       void room.localParticipant
         .setMicrophoneEnabled(false)
-        .catch(() => setError(TALKIE_WALKIE_UNAVAILABLE));
+        .catch((error: unknown) =>
+          setError(formatLiveKitError(error)),
+        );
     }
   };
 
   const retryConnection = () => {
-    void connect().catch(() => setError(TALKIE_WALKIE_UNAVAILABLE));
+    void connect().catch((error: unknown) =>
+      setError(formatLiveKitError(error)),
+    );
   };
 
   return (

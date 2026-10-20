@@ -110,3 +110,13 @@ test("mobile endpoint inventory includes the reviewed surfaces", () => {
     );
   }
 });
+
+test("the public FedaPay webhook route is mounted under the API prefix", () => {
+  assert.ok(
+    routes.some(
+      (route) =>
+        route.method === "POST" &&
+        route.path === "/api/v1/payments/fedapay-webhook",
+    ),
+  );
+});

@@ -134,23 +134,11 @@ jobs:
           const fs = require("node:fs");
 
           const file = "mobile/google-services.json";
-          const bytes = fs.readFileSync(file);
-          const raw = bytes.toString("utf8");
-          const characters = Array.from(raw);
+          const raw = fs.readFileSync(file, "utf8");
           const invisible = /[\u200B-\u200F\u2060\uFEFF\u00A0]/g;
-          const invisibleCount = (raw.match(invisible) || []).length;
-          const codePoint = (character) =>
-            character === undefined
-              ? "aucun"
-              : `U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`;
           const cleaned = raw.replace(invisible, "");
 
-          console.log(`Taille : ${bytes.length} octets`);
-          console.log(`Code du premier caractère : ${codePoint(characters[0])}`);
-          console.log(`Code du dernier caractère : ${codePoint(characters.at(-1))}`);
-          console.log(`Caractères invisibles supprimés : ${invisibleCount}`);
-
-          if (bytes.length === 0) {
+          if (cleaned.length === 0) {
             console.log("Position de l’erreur de parse : non applicable");
             console.error("::error::google-services.json vide.");
             process.exit(1);
@@ -184,8 +172,6 @@ jobs:
             process.exit(1);
           }
 
-          console.log("Position de l’erreur de parse : aucune");
-
           if (typeof config.project_info?.project_id !== "string" || !config.project_info.project_id.trim()) {
             console.error("::error::Clé manquante ou vide : project_info.project_id.");
             process.exit(1);
@@ -214,6 +200,26 @@ jobs:
           fi
           if ! node -e "const config=require('./mobile/google-services.json'); if (!config.client.some((client) => client.client_info.android_client_info.package_name === process.argv[1])) process.exit(1)" "$EXPECTED_PACKAGE"; then
             echo "::error::Le package_name de google-services.json ne correspond pas à expo.android.package dans mobile/app.json."
+            exit 1
+          fi
+          if ! EXPECTED_PACKAGE="$EXPECTED_PACKAGE" node <<'NODE'
+          const config = require("./mobile/google-services.json");
+          const packageName = process.env.EXPECTED_PACKAGE;
+          const hasAndroidOAuthClient = config.client.some(
+            (client) =>
+              client.client_info.android_client_info.package_name === packageName &&
+              client.oauth_client?.some(
+                (oauth) =>
+                  oauth.client_type === 3 &&
+                  oauth.android_info?.package_name === packageName &&
+                  typeof oauth.android_info.certificate_hash === "string" &&
+                  oauth.android_info.certificate_hash,
+              ),
+          );
+          if (!hasAndroidOAuthClient) process.exit(1);
+          NODE
+          then
+            echo "::error::Client OAuth Android absent de google-services.json ; ajoutez dans Firebase le package et le SHA-1 du certificat EAS, puis renouvelez GOOGLE_SERVICES_JSON."
             exit 1
           fi
           FIREBASE_PROJECT_ID="$(node -p "require('./mobile/google-services.json').project_info.project_id")"

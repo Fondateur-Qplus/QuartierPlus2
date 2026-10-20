@@ -160,6 +160,10 @@ const getVerifiedAsset = async (userId, mediaPublicId, mediaType) => {
   }
   const asset = await getCloudinaryAsset(mediaType, mediaPublicId);
   if (!asset || asset.public_id !== mediaPublicId) {
+    console.error("Cloudinary public ID mismatch:", {
+      expectedPublicId: mediaPublicId,
+      receivedPublicId: asset?.public_id ?? null,
+    });
     return { error: "Le média téléversé est introuvable ou invalide." };
   }
   if (mediaType === "image" && hasGpsMetadata(asset.image_metadata)) {

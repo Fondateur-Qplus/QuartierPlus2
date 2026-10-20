@@ -5,6 +5,7 @@ export type QueueStatus = "pending" | "processing" | "failed";
 export type SyncActionType = "create_post" | "trigger_sos";
 export type SyncAction = {
   id: number;
+  ownerId?: string;
   actionType: SyncActionType;
   payload: Record<string, unknown>;
   status: QueueStatus;
@@ -13,9 +14,19 @@ export type SyncAction = {
 };
 
 const getDatabase = getSharedDatabase;
+const memoryCollections = new Map<string, unknown[]>();
+const memoryMessages = new Map<string, unknown[]>();
+const memoryApiCache = new Map<string, unknown>();
+const memoryQueue: SyncAction[] = [];
+let nextMemoryQueueId = -1;
+let memoryQueryClient: unknown;
 
 const logCacheFailure = (error: unknown) => {
   console.warn("Cache SQLite indisponible.", error);
+};
+
+const logMemoryFallback = (operation: string, error: unknown) => {
+  console.warn(`Stockage en mémoire utilisé pour ${operation}.`, error);
 };
 
 const saveCollection = async (
@@ -68,23 +79,29 @@ export const initializeDatabase = initializeSharedDatabase;
 export const cachePosts = (posts: unknown[]) =>
   saveCollection("cached_posts", posts).catch((error: unknown) => {
     logCacheFailure(error);
+    logMemoryFallback("les publications en cache", error);
+    memoryCollections.set("cached_posts", [...posts]);
   });
 
 export const getCachedPosts = <T = unknown>() =>
   loadCollection<T>("cached_posts").catch((error: unknown) => {
     logCacheFailure(error);
-    return [] as T[];
+    logMemoryFallback("la lecture des publications en cache", error);
+    return (memoryCollections.get("cached_posts") ?? []) as T[];
   });
 
 export const cacheAlerts = (alerts: unknown[]) =>
   saveCollection("cached_alerts", alerts).catch((error: unknown) => {
     logCacheFailure(error);
+    logMemoryFallback("les alertes en cache", error);
+    memoryCollections.set("cached_alerts", [...alerts]);
   });
 
 export const getCachedAlerts = <T = unknown>() =>
   loadCollection<T>("cached_alerts").catch((error: unknown) => {
     logCacheFailure(error);
-    return [] as T[];
+    logMemoryFallback("la lecture des alertes en cache", error);
+    return (memoryCollections.get("cached_alerts") ?? []) as T[];
   });
 
 export const cacheMessages = async (
@@ -128,6 +145,8 @@ export const cacheMessages = async (
     });
   } catch (error) {
     logCacheFailure(error);
+    logMemoryFallback("les messages en cache", error);
+    memoryMessages.set(threadKey, [...messages]);
   }
 };
 
@@ -144,7 +163,8 @@ export const getCachedMessages = async <T>(
     return rows.map((row) => JSON.parse(row.payload) as T);
   } catch (error) {
     logCacheFailure(error);
-    return [];
+    logMemoryFallback("la lecture des messages en cache", error);
+    return (memoryMessages.get(threadKey) ?? []) as T[];
   }
 };
 
@@ -157,6 +177,12 @@ export const clearCachedMessages = async (ownerId: string): Promise<void> => {
     );
   } catch (error) {
     logCacheFailure(error);
+    logMemoryFallback("la suppression des messages en cache", error);
+    for (const key of memoryMessages.keys()) {
+      if (key.startsWith(`user:${encodeURIComponent(ownerId)}:`)) {
+        memoryMessages.delete(key);
+      }
+    }
   }
 };
 
@@ -170,7 +196,8 @@ export const getApiCache = async <T>(cacheKey: string): Promise<T | null> => {
     return row ? (JSON.parse(row.payload) as T) : null;
   } catch (error) {
     logCacheFailure(error);
-    return null;
+    logMemoryFallback("la lecture du cache API", error);
+    return (memoryApiCache.get(cacheKey) as T | undefined) ?? null;
   }
 };
 
@@ -201,6 +228,8 @@ export const setApiCache = async (
     });
   } catch (error) {
     logCacheFailure(error);
+    logMemoryFallback("le cache API", error);
+    memoryApiCache.set(cacheKey, payload);
   }
 };
 
@@ -210,6 +239,8 @@ export const clearApiCache = async (): Promise<void> => {
     await database.execAsync("DELETE FROM api_cache");
   } catch (error) {
     logCacheFailure(error);
+    logMemoryFallback("la suppression du cache API", error);
+    memoryApiCache.clear();
   }
 };
 
@@ -218,68 +249,112 @@ export const enqueueOfflineAction = async (
   ownerId: string,
   payload: Record<string, unknown>,
 ): Promise<number> => {
-  const database = await getDatabase();
-  const result = await database.runAsync(
-    "INSERT INTO sync_queue (owner_id, action_type, payload, status) VALUES (?, ?, ?, 'pending')",
-    ownerId,
-    actionType,
-    JSON.stringify(payload),
-  );
-  return result.lastInsertRowId;
+  try {
+    const database = await getDatabase();
+    const result = await database.runAsync(
+      "INSERT INTO sync_queue (owner_id, action_type, payload, status) VALUES (?, ?, ?, 'pending')",
+      ownerId,
+      actionType,
+      JSON.stringify(payload),
+    );
+    return result.lastInsertRowId;
+  } catch (error) {
+    logCacheFailure(error);
+    logMemoryFallback("la file d'actions hors ligne", error);
+    const id = nextMemoryQueueId++;
+    memoryQueue.push({
+      id,
+      ownerId,
+      actionType,
+      payload,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+      attempts: 0,
+    });
+    return id;
+  }
 };
 
 export const getPendingActions = async (ownerId: string): Promise<SyncAction[]> => {
-  const database = await getDatabase();
-  const rows = await database.getAllAsync<{
-    id: number;
-    action_type: SyncActionType;
-    payload: string;
-    status: QueueStatus;
-    created_at: string;
-    attempts: number;
-  }>(
-    `SELECT id, action_type, payload, status, created_at, attempts
-     FROM sync_queue
-     WHERE owner_id = ? AND status IN ('pending', 'failed')
-     ORDER BY id`,
-    ownerId,
-  );
-  return rows.map((row) => ({
-    id: row.id,
-    actionType: row.action_type,
-    payload: JSON.parse(row.payload) as Record<string, unknown>,
-    status: row.status,
-    createdAt: row.created_at,
-    attempts: row.attempts,
-  }));
+  try {
+    const database = await getDatabase();
+    const rows = await database.getAllAsync<{
+      id: number;
+      action_type: SyncActionType;
+      payload: string;
+      status: QueueStatus;
+      created_at: string;
+      attempts: number;
+    }>(
+      `SELECT id, action_type, payload, status, created_at, attempts
+       FROM sync_queue
+       WHERE owner_id = ? AND status IN ('pending', 'failed')
+       ORDER BY id`,
+      ownerId,
+    );
+    return [
+      ...rows.map((row) => ({
+        id: row.id,
+        actionType: row.action_type,
+        payload: JSON.parse(row.payload) as Record<string, unknown>,
+        status: row.status,
+        createdAt: row.created_at,
+        attempts: row.attempts,
+      })),
+      ...memoryQueue.filter((action) =>
+        action.ownerId === ownerId &&
+        ["pending", "failed"].includes(action.status),
+      ),
+    ];
+  } catch (error) {
+    logCacheFailure(error);
+    logMemoryFallback("la lecture de la file hors ligne", error);
+    return memoryQueue.filter((action) =>
+      action.ownerId === ownerId &&
+      ["pending", "failed"].includes(action.status),
+    );
+  }
 };
 
 export const updateSyncAction = async (
   id: number,
   status: QueueStatus,
 ): Promise<void> => {
-  const database = await getDatabase();
-  const result = await database.runAsync(
-    `UPDATE sync_queue
+  try {
+    const database = await getDatabase();
+    const result = await database.runAsync(
+      `UPDATE sync_queue
      SET status = ?,
          attempts = attempts + CASE WHEN ? = 'processing' THEN 1 ELSE 0 END,
          updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
-    status,
-    status,
-    id,
-  );
-  if (result.changes !== 1) {
-    throw new Error(`L'action hors ligne ${id} n'existe pas.`);
+      status,
+      status,
+      id,
+    );
+    if (result.changes === 1) return;
+  } catch (error) {
+    logCacheFailure(error);
+    logMemoryFallback("la mise à jour de la file hors ligne", error);
   }
+  const action = memoryQueue.find((entry) => entry.id === id);
+  if (!action) throw new Error(`L'action hors ligne ${id} n'existe pas.`);
+  action.status = status;
+  if (status === "processing") action.attempts += 1;
 };
 
 export const removeSyncAction = async (id: number): Promise<void> => {
-  const database = await getDatabase();
-  const result = await database.runAsync("DELETE FROM sync_queue WHERE id = ?", id);
-  if (result.changes !== 1) {
-    throw new Error(`L'action hors ligne ${id} n'existe pas.`);
+  try {
+    const database = await getDatabase();
+    const result = await database.runAsync("DELETE FROM sync_queue WHERE id = ?", id);
+    if (result.changes === 1) return;
+  } catch (error) {
+    logCacheFailure(error);
+    logMemoryFallback("la suppression de la file hors ligne", error);
   }
+  const index = memoryQueue.findIndex((entry) => entry.id === id);
+  if (index < 0) throw new Error(`L'action hors ligne ${id} n'existe pas.`);
+  memoryQueue.splice(index, 1);
 };
 
 export const getPersistedQueryClient = async <T>(): Promise<T | undefined> => {
@@ -291,7 +366,8 @@ export const getPersistedQueryClient = async <T>(): Promise<T | undefined> => {
     return row ? (JSON.parse(row.payload) as T) : undefined;
   } catch (error) {
     logCacheFailure(error);
-    return undefined;
+    logMemoryFallback("la lecture du cache React Query", error);
+    return memoryQueryClient as T | undefined;
   }
 };
 
@@ -308,6 +384,8 @@ export const setPersistedQueryClient = async (payload: unknown): Promise<void> =
     );
   } catch (error) {
     logCacheFailure(error);
+    logMemoryFallback("le cache React Query", error);
+    memoryQueryClient = payload;
   }
 };
 
@@ -317,5 +395,7 @@ export const clearPersistedQueryClient = async (): Promise<void> => {
     await database.runAsync("DELETE FROM query_cache WHERE id = 1");
   } catch (error) {
     logCacheFailure(error);
+    logMemoryFallback("la suppression du cache React Query", error);
+    memoryQueryClient = undefined;
   }
 };

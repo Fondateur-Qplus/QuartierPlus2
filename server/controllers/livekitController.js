@@ -5,6 +5,19 @@ const ROOM_NAME_PATTERN =
   /^(?:emergency|grin|sos_[A-Za-z0-9-]{1,100}|channel_[A-Za-z0-9-]{1,100})$/;
 const TOKEN_TTL_SECONDS = 10 * 60;
 
+const safeDiagnostic = (error) => {
+  const code =
+    typeof error?.code === "string" || typeof error?.code === "number"
+      ? String(error.code)
+      : "LIVEKIT_TOKEN_ERROR";
+  let message =
+    typeof error?.message === "string" ? error.message : "Erreur inconnue.";
+  for (const secret of [env.livekitApiKey, env.livekitApiSecret]) {
+    if (secret) message = message.replaceAll(secret, "[masqué]");
+  }
+  return { code, message: message.slice(0, 300) };
+};
+
 export const createLiveKitToken = async (request, response) => {
   const roomName =
     typeof request.body?.roomName === "string"
@@ -25,12 +38,18 @@ export const createLiveKitToken = async (request, response) => {
   if (!env.livekitConfigurationIsUsable) {
     const details = env.livekitConfigurationProblems.join(", ");
     const diagnostic = env.livekitConfigurationProblemDetails.join(" ");
+    const code = details.includes("LIVEKIT_API_KEY")
+      ? "LIVEKIT_API_KEY_INVALID"
+      : details.includes("LIVEKIT_API_SECRET")
+        ? "LIVEKIT_API_SECRET_INVALID"
+        : "LIVEKIT_URL_INVALID";
     console.error(
-      `LiveKit is unavailable; missing or invalid configuration: ${diagnostic}`,
+      `LiveKit configuration rejected (${code}): ${diagnostic}`,
     );
     return response.status(503).json({
-      error:
-        `Talkie-walkie indisponible : vérifiez ${details}.`,
+      error: "LiveKit est indisponible.",
+      code,
+      reason: `${diagnostic} (code ${code}).`,
     });
   }
 
@@ -40,7 +59,9 @@ export const createLiveKitToken = async (request, response) => {
   } catch {
     console.error("LiveKit configuration error: LIVEKIT_URL is not a valid URL.");
     return response.status(503).json({
-      error: "L'adresse du service audio LiveKit est invalide.",
+      error: "LiveKit est indisponible.",
+      code: "LIVEKIT_URL_INVALID",
+      reason: "LIVEKIT_URL doit être une URL wss:// valide (code LIVEKIT_URL_INVALID).",
     });
   }
   if (
@@ -51,7 +72,9 @@ export const createLiveKitToken = async (request, response) => {
       "LiveKit configuration error: LIVEKIT_URL must be a valid wss:// URL.",
     );
     return response.status(503).json({
-      error: "L'adresse LiveKit doit utiliser une URL WSS valide.",
+      error: "LiveKit est indisponible.",
+      code: "LIVEKIT_URL_INVALID",
+      reason: "LIVEKIT_URL doit être une URL wss:// valide (code LIVEKIT_URL_INVALID).",
     });
   }
 
@@ -89,9 +112,12 @@ export const createLiveKitToken = async (request, response) => {
       expiresIn: TOKEN_TTL_SECONDS,
     });
   } catch (error) {
-    console.error("Failed to issue LiveKit access token:", error);
+    const diagnostic = safeDiagnostic(error);
+    console.error("Failed to issue LiveKit access token:", diagnostic);
     return response.status(503).json({
-      error: "Impossible de générer un jeton LiveKit pour le moment.",
+      error: "Impossible de générer un jeton LiveKit.",
+      code: diagnostic.code,
+      reason: `Génération du jeton LiveKit échouée : ${diagnostic.message} (code ${diagnostic.code}).`,
     });
   }
 };

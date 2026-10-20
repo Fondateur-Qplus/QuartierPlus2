@@ -1,68 +1,134 @@
-# Secrets et configuration
+# Configuration et secrets
 
-Les valeurs réelles sont uniquement configurées dans GitHub Actions ou dans
-l'environnement correspondant. Ne pas les ajouter au dépôt, aux journaux CI ou
-aux bundles qui ne les nécessitent pas.
+Ne mettez jamais les secrets serveur dans l'app, GitHub Actions logs, ni dans
+les variables `EXPO_PUBLIC_*`.
 
-## Secrets de build de l'app
+## Render — API serveur
 
-Configurer comme secrets GitHub :
+Variables obligatoires en production :
 
-- `GOOGLE_SERVICES_JSON` — configuration Firebase Android du projet
-  `quartierplus-final` et du package `com.administrateur.quartierplus`.
-- `EXPO_PUBLIC_FIREBASE_PROJECT_ID` — doit valoir l'identifiant
-  `quartierplus-final`; le workflow le compare au fichier Google Services sans
-  afficher la valeur du secret.
-- `EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
-- `EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID`
-- `EXPO_PUBLIC_API_URL` — URL de l'API consommée par l'application.
-- `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` — clé SDK Android Maps; injectée dans le
-  manifeste Android par `app.config.js`, jamais écrite dans un fichier suivi.
-- `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` — obligatoire pour le build Android.
-- `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` — obligatoire pour l'authentification
-  Google; cette valeur est configurée comme `webClientId` par le SDK natif.
-- `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` — optionnel pour les builds iOS.
-- `EXPO_PUBLIC_EAS_PROJECT_ID` — optionnel; l'identifiant défini dans `app.json`
-  est utilisé en son absence.
-- `EXPO_PUBLIC_LIVEKIT_URL` — optionnel; son absence désactive les fonctions
-  LiveKit et déclenche un avertissement dans le workflow.
+```text
+DATABASE_URL
+JWT_SECRET
+TICKET_QR_SECRET
+GOOGLE_CLIENT_ID
+SMS_DELIVERY_URL
+SMS_DELIVERY_TOKEN
+```
 
-Les valeurs `EXPO_PUBLIC_*` sont intégrées au client et ne doivent donc jamais
-contenir de secret serveur. Le workflow ne transmet au prebuild et à Gradle que
-des variables dont le nom commence par `EXPO_PUBLIC_`.
+Variables supplémentaires à créer pour activer les fonctions correspondantes :
 
-Pour l'identifiant OAuth Android Google, enregistrer le package
-`com.administrateur.quartierplus` et l'empreinte SHA-1 du certificat de
-signature de l'APK installé. Récupérer l'empreinte de la version réellement
-distribuée depuis `apksigner verify --print-certs`; debug et release peuvent
-avoir des empreintes différentes. L'identifiant client Web reste la valeur
-`EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` utilisée par le SDK natif.
+```text
+LIVEKIT_API_KEY
+LIVEKIT_API_SECRET
+LIVEKIT_URL
+CLOUDINARY_CLOUD_NAME
+CLOUDINARY_API_KEY
+CLOUDINARY_API_SECRET
+BILLING_ENABLED
+FEDAPAY_SECRET_KEY
+FEDAPAY_PUBLIC_KEY
+FEDAPAY_ENVIRONMENT
+FEDAPAY_WEBHOOK_SECRET
+GOOGLE_CLIENT_IDS
+SMTP_HOST
+SMTP_PORT
+SMTP_USER
+SMTP_PASS
+MAIL_FROM
+EMAIL_PROVIDER
+EMAIL_API_KEY
+EMAIL_FROM
+ADMIN_TEST_EMAIL_TOKEN
+IS_PROMO_FREE_ACCESS
+PGSSL
+JWT_EXPIRES_IN
+OTP_TEST_MODE
+OTP_TEST_ALLOWLIST
+POST_MAX_PHOTO_BYTES
+POST_MAX_VIDEO_SECONDS
+POST_MAX_VIDEO_BYTES
+POST_DAILY_LIMIT
+SOCKET_CORS_ORIGIN
+```
 
-## Secrets serveur uniquement
+`LIVEKIT_API_KEY` doit correspondre à `^API[A-Za-z0-9_-]+$`. `LIVEKIT_URL` doit
+être une URL `wss://`. Cloudinary et FedaPay sont configurés exclusivement sur
+Render. Ne transmettez jamais `LIVEKIT_API_SECRET`, `CLOUDINARY_API_SECRET`,
+`FEDAPAY_SECRET_KEY` ni `FEDAPAY_WEBHOOK_SECRET` à EAS.
 
-Ne jamais transmettre ces valeurs aux étapes Expo ou Gradle ni les intégrer à
-l'application :
+Configurer l'URL FedaPay publique suivante et une signature HMAC-SHA256 du corps
+HTTP brut dans `X-FedaPay-Signature` :
 
-- `DATABASE_URL`
-- `JWT_SECRET`
-- `API_KEY_SALT`
-- `FIREBASE_PRIVATE_KEY`
-- `FIREBASE_CLIENT_EMAIL`
-- `CLOUDINARY_API_SECRET`
-- `CLOUDINARY_URL`
-- `LIVEKIT_API_SECRET`
-- `FEDAPAY_SECRET_KEY`
-- `FEDAPAY_WEBHOOK_SECRET`
-- `TICKET_QR_SECRET`
-- `SMS_DELIVERY_TOKEN`
-- `EXPO_TOKEN` — authentification de l'automatisation EAS uniquement.
+```text
+https://quartierplus-api.onrender.com/api/v1/payments/fedapay-webhook
+```
 
-`CLOUDINARY_API_KEY`, `LIVEKIT_API_KEY`, `FEDAPAY_PUBLIC_KEY`,
-`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_IDS`, `LIVEKIT_URL`,
-`FEDAPAY_ENVIRONMENT`, `SMS_DELIVERY_URL` et les variables de configuration
-serveur restent côté serveur. Même les clés publiques serveur ne sont pas des
-variables de build de l'application.
+La signature attendue est l'hexadécimal HMAC-SHA256 de l'octet exact envoyé,
+calculé avec `FEDAPAY_WEBHOOK_SECRET` (préfixe `sha256=` accepté). La route
+n'exige pas de jeton utilisateur.
 
-Le HMAC utilisé pour `otp_verifications.code_hash` dérive de `JWT_SECRET` dans
-`server/controllers/authController.js`; `HMAC_SECRET` n'est pas lu par le code
-actuel. Ne pas créer ni modifier de secret Render pour cette correction.
+## GitHub Actions et environnement EAS `preview`
+
+Les variables suivantes sont intégrées au client ; ce ne sont pas des secrets :
+
+```text
+EXPO_PUBLIC_API_URL
+EXPO_PUBLIC_FIREBASE_API_KEY
+EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN
+EXPO_PUBLIC_FIREBASE_PROJECT_ID
+EXPO_PUBLIC_FIREBASE_APP_ID
+EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET
+EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
+EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
+EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID
+EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+EXPO_PUBLIC_EAS_PROJECT_ID
+EXPO_PUBLIC_LIVEKIT_URL
+```
+
+Les workflows acceptent ces valeurs comme GitHub Actions Variables ou Secrets.
+Pour une mise à jour OTA, configurez aussi les valeurs client dans
+l'environnement EAS `preview` utilisé par `eas update --environment preview`.
+
+Secrets GitHub réservés aux workflows :
+
+```text
+GOOGLE_SERVICES_JSON
+EXPO_TOKEN
+```
+
+`GOOGLE_SERVICES_JSON` est écrit temporairement dans `mobile/google-services.json`
+par le workflow APK ; le contenu n'est pas imprimé. `EXPO_TOKEN` est passé à EAS
+et n'est pas affiché. Les workflows ne doivent jamais activer `set -x` ou imprimer
+une valeur de secret.
+
+## Configuration Google requise
+
+Dans Firebase Console, activez Google dans Authentication, vérifiez l'app
+Android `com.administrateur.quartierplus`, puis ajoutez les empreintes SHA-1 et
+SHA-256 du certificat de signature EAS de chaque profil distribué. Obtenez-les
+dans `eas credentials -p android` pour le profil EAS concerné ; l'empreinte du
+keystore debug local n'est pas celle de l'APK EAS. Après modification,
+téléchargez le nouveau `google-services.json` et remplacez le secret GitHub
+`GOOGLE_SERVICES_JSON`.
+
+Dans Google Cloud Console → API et services → Identifiants, créez/vérifiez le
+client OAuth Android avec le package et le SHA-1 exacts, ainsi qu'un client OAuth
+Web. `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` doit contenir le client Web ;
+`GOOGLE_CLIENT_ID` sur Render doit accepter ce même ID.
+`EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` doit contenir l'ID client Android.
+Pour iOS, le bundle configuré est `com.anonymous.quartierplus` et
+`EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` doit être le client OAuth iOS associé.
+Lors d'un build iOS, `mobile/app.config.js` dérive le schéma URL de retour
+Google de cet ID et l'ajoute au binaire ; configurez-le dans GitHub Actions et
+dans l'environnement EAS utilisé pour le build.
+L'erreur Android `10` / `DEVELOPER_ERROR` indique généralement un client OAuth,
+un package ou une empreinte SHA manquante/incohérente. Ne transmettez pas le
+keystore ni sa clé privée à Firebase, GitHub variables ou au dépôt.
+
+`GOOGLE_CLIENT_IDS` sur Render est facultatif et permet d'ajouter des audiences
+OAuth autorisées séparées par des virgules. `EXPO_PUBLIC_*` ne contient jamais
+de secret serveur.

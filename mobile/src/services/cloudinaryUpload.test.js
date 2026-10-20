@@ -103,6 +103,38 @@ describe("Cloudinary signed uploads", () => {
     });
   });
 
+  it("accepts an expected public ID under an account-managed dynamic folder", async () => {
+    const signature = {
+      apiKey: "public-api-key",
+      cloudName: "test-cloud",
+      folder: "quartierplus/posts",
+      public_id: "user_photo",
+      resource_type: "video",
+      signature: "signed-value",
+      timestamp: 123,
+    };
+    const secureUrl =
+      "https://res.cloudinary.com/test-cloud/video/upload/dynamic/folder/user_photo.mp4";
+    axios.post.mockResolvedValue({
+      data: {
+        public_id: "dynamic/folder/user_photo",
+        secure_url: secureUrl,
+      },
+    });
+
+    await expect(
+      uploadCloudinaryMedia(signature, {
+        uri: "file:///photo.jpg",
+        name: "photo.mp4",
+        type: "video/mp4",
+        size: 20 * 1024 * 1024 + 1,
+      }),
+    ).resolves.toEqual({
+      publicId: "dynamic/folder/user_photo",
+      secureUrl,
+    });
+  });
+
   it("logs and reports expected and received IDs when Cloudinary returns an invalid ID", async () => {
     const signature = {
       apiKey: "public-api-key",

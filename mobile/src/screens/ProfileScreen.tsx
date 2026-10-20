@@ -23,6 +23,7 @@ import * as Updates from "expo-updates";
 import { useNavigation, type NavigationProp } from "@react-navigation/native";
 import {
   openProfileStore,
+  getProfileStorageDiagnostic,
   type AppPreferences,
   type ProfileStore,
   type TrustedContact,
@@ -64,6 +65,8 @@ import {
 type Country = EmergencyCountry;
 
 const COUNTRIES = EMERGENCY_COUNTRIES;
+const storageFallbackMessage = () =>
+  `Stockage local temporaire en mémoire.\n${getProfileStorageDiagnostic()}`;
 
 const EMERGENCY_SERVICES = [
   { id: "police", name: "Police / Gendarmerie", icon: Shield },
@@ -200,12 +203,11 @@ export default function ProfileScreen() {
         setSosNotificationsEnabled(savedPreferences.sosNotificationsEnabled);
         setDefaultRadius(`${savedPreferences.defaultRadiusKm} km`);
         if (database.isMemoryFallback) {
-          const message =
-            "Stockage hors ligne indisponible. Réessayez dans quelques instants.";
+          const message = storageFallbackMessage();
           setDatabaseError(message);
           Alert.alert(
-            "Stockage hors ligne indisponible",
-            "Réessayez dans quelques instants.",
+            "Stockage hors ligne — fallback mémoire",
+            message,
           );
         } else {
           setDatabaseError(null);
@@ -225,12 +227,11 @@ export default function ProfileScreen() {
       } catch (error) {
         if (!isMounted) return;
         console.error("Local profile storage could not be initialized:", error);
-        const message =
-          "Stockage hors ligne indisponible. Réessayez dans quelques instants.";
+        const message = storageFallbackMessage();
         setDatabaseError(message);
         Alert.alert(
-          "Stockage hors ligne indisponible",
-          "Réessayez dans quelques instants.",
+          "Stockage hors ligne — fallback mémoire",
+          `${message}\n\nLes publications en ligne restent disponibles.`,
         );
       }
     })();
@@ -286,7 +287,7 @@ export default function ProfileScreen() {
     const database = databaseRef.current;
     if (!database) {
       Alert.alert(
-        "Stockage hors ligne indisponible",
+      "Stockage hors ligne — fallback mémoire",
         databaseError ?? "Le stockage local n'est pas prêt.",
       );
       return;
@@ -297,10 +298,9 @@ export default function ProfileScreen() {
         emergencyNumbers: country.emergencyNumbers,
       });
       if (database.isMemoryFallback) {
-        const message =
-          "Stockage hors ligne indisponible. Réessayez dans quelques instants.";
+        const message = storageFallbackMessage();
         setDatabaseError(message);
-        Alert.alert("Stockage hors ligne indisponible", "Réessayez dans quelques instants.");
+        Alert.alert("Stockage hors ligne — fallback mémoire", message);
       }
       setSelectedCountry(country);
       setCountryMenuOpen(false);
@@ -391,7 +391,7 @@ export default function ProfileScreen() {
     const phone = contactPhone.trim();
     if (!database) {
       Alert.alert(
-        "Stockage hors ligne indisponible",
+        "Stockage hors ligne — fallback mémoire",
         databaseError ?? "Le stockage local n'est pas prêt.",
       );
       return;
@@ -426,10 +426,9 @@ export default function ProfileScreen() {
           };
       await database.saveContact(saved);
       if (database.isMemoryFallback) {
-        const message =
-          "Stockage hors ligne indisponible. Réessayez dans quelques instants.";
+        const message = storageFallbackMessage();
         setDatabaseError(message);
-        Alert.alert("Stockage hors ligne indisponible", "Réessayez dans quelques instants.");
+        Alert.alert("Stockage hors ligne — fallback mémoire", message);
       }
       setContacts((current) =>
         editingContact
@@ -460,10 +459,9 @@ export default function ProfileScreen() {
         .map((contact, index) => ({ ...contact, position: index + 1 }));
       await database.deleteContact(editingContact.id, remaining);
       if (database.isMemoryFallback) {
-        const message =
-          "Stockage hors ligne indisponible. Réessayez dans quelques instants.";
+        const message = storageFallbackMessage();
         setDatabaseError(message);
-        Alert.alert("Stockage hors ligne indisponible", "Réessayez dans quelques instants.");
+        Alert.alert("Stockage hors ligne — fallback mémoire", message);
       }
       setContacts(remaining);
       setIsContactModalVisible(false);
@@ -537,10 +535,9 @@ export default function ProfileScreen() {
     try {
       await database.setPreferences(next);
       if (database.isMemoryFallback) {
-        const message =
-          "Stockage hors ligne indisponible. Réessayez dans quelques instants.";
+        const message = storageFallbackMessage();
         setDatabaseError(message);
-        Alert.alert("Stockage hors ligne indisponible", "Réessayez dans quelques instants.");
+        Alert.alert("Stockage hors ligne — fallback mémoire", message);
       }
       setSosNotificationsEnabled(next.sosNotificationsEnabled);
       setDefaultRadius(`${next.defaultRadiusKm} km`);
@@ -548,7 +545,9 @@ export default function ProfileScreen() {
     } catch (error) {
       Alert.alert(
         "Enregistrement impossible",
-        "Impossible d'enregistrer vos préférences. Réessayez.",
+        error instanceof Error
+          ? error.message
+          : "Impossible d'enregistrer vos préférences (code PREFERENCES_SAVE_FAILED).",
       );
     }
   };

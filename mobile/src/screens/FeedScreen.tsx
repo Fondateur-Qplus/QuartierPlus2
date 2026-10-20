@@ -762,9 +762,11 @@ export default function FeedScreen() {
       if (!signatureResponse.ok) {
         const payload: unknown = await signatureResponse.json();
         throw new PublicationApiError(
-          isRecord(payload) && typeof payload.error === "string"
-            ? payload.error
-            : "Impossible de préparer le téléversement.",
+          isRecord(payload) && typeof payload.reason === "string"
+            ? payload.reason
+            : isRecord(payload) && typeof payload.error === "string"
+              ? payload.error
+              : `Impossible de préparer le téléversement (HTTP ${signatureResponse.status}).`,
         );
       }
       const signaturePayload: unknown = await signatureResponse.json();
@@ -840,9 +842,11 @@ export default function FeedScreen() {
       if (!postResponse.ok) {
         const payload: unknown = await postResponse.json();
         throw new PublicationApiError(
-          isRecord(payload) && typeof payload.error === "string"
-            ? payload.error
-            : "La publication a été refusée par le serveur.",
+          isRecord(payload) && typeof payload.reason === "string"
+            ? payload.reason
+            : isRecord(payload) && typeof payload.error === "string"
+              ? payload.error
+              : `La publication a été refusée par le serveur (HTTP ${postResponse.status}).`,
         );
       }
       setUploadProgress(100);
@@ -892,9 +896,14 @@ export default function FeedScreen() {
         setDraftMedia(null);
         setDraftCaption("");
         refresh();
+        const uploadReason =
+          publishError instanceof PublicationApiError ||
+          publishError instanceof MediaUploadError
+            ? publishError.message
+            : "Erreur de téléversement inconnue (code CLOUDINARY_UPLOAD_FAILED).";
         Alert.alert(
           "Publication texte seule",
-          "Le média n'a pas pu être téléversé. Votre publication texte a été enregistrée.",
+          `Le média n'a pas pu être téléversé : ${uploadReason}\nVotre publication texte a été enregistrée.`,
         );
       } catch (fallbackError) {
         if (controller.signal.aborted) return;

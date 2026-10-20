@@ -56,6 +56,29 @@ let memoryCountry: StoredCountry | null = null;
 let memoryContacts: TrustedContact[] = [];
 let memoryPreferences = defaultPreferences();
 let usingMemoryFallback = false;
+let memoryFallbackDiagnostic: string | null = null;
+
+const describeStorageFailure = (error: unknown) => {
+  const record =
+    typeof error === "object" && error !== null
+      ? (error as Record<string, unknown>)
+      : null;
+  const code =
+    typeof record?.code === "string" || typeof record?.code === "number"
+      ? String(record.code)
+      : "SQLITE_INITIALIZATION_FAILED";
+  const message =
+    error instanceof Error
+      ? error.message
+      : record && typeof record.message === "string"
+        ? record.message
+        : String(error);
+  return `Module : expo-sqlite\nCode : ${code}\nMessage : ${message.slice(0, 300)}`;
+};
+
+export const getProfileStorageDiagnostic = () =>
+  memoryFallbackDiagnostic ??
+  "Module : expo-sqlite\nCode : SQLITE_INITIALIZATION_FAILED\nMessage : détail indisponible.";
 
 const hasTable = async (database: SQLite.SQLiteDatabase, name: string) => {
   const table = await database.getFirstAsync<{ name: string }>(
@@ -160,6 +183,7 @@ const createMemoryProfileStore = (): ProfileStore => ({
 
 const reportProfileStorageFailure = (operation: string, error: unknown) => {
   usingMemoryFallback = true;
+  memoryFallbackDiagnostic = describeStorageFailure(error);
   console.error(`Profile storage ${operation} failed; using memory fallback:`, error);
 };
 
@@ -183,6 +207,7 @@ export const openProfileStore = async (): Promise<ProfileStore> => {
       database = await openProfileDatabase();
       break;
     } catch (error) {
+      memoryFallbackDiagnostic = describeStorageFailure(error);
       console.error(
         `Unable to initialize the local profile store (attempt ${attempt}/3):`,
         error,
@@ -201,6 +226,7 @@ export const openProfileStore = async (): Promise<ProfileStore> => {
   }
   const initializedDatabase = database;
   usingMemoryFallback = false;
+  memoryFallbackDiagnostic = null;
   return {
     get isMemoryFallback() {
       return usingMemoryFallback;

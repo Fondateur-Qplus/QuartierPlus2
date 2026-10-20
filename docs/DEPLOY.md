@@ -154,9 +154,9 @@ invaliderait les signatures des billets déjà émis.
 | `FEDAPAY_SECRET_KEY` | Clé secrète FedaPay pour les paiements |
 | `FEDAPAY_PUBLIC_KEY` | Clé publique FedaPay |
 | `FEDAPAY_ENVIRONMENT` | `sandbox` pour les tests, `live` pour la production |
-| `FEDAPAY_WEBHOOK_SECRET` | Secret configuré dans l'en-tête du webhook FedaPay |
+| `FEDAPAY_WEBHOOK_SECRET` | Secret HMAC-SHA256 du corps brut reçu via `X-FedaPay-Signature` |
 | `SOCKET_CORS_ORIGIN` | Origines web autorisées, séparées par des virgules |
-| `LIVEKIT_API_KEY` | Clé API du projet LiveKit |
+| `LIVEKIT_API_KEY` | Clé API LiveKit au format `API...` (`^API[A-Za-z0-9_-]+$`) |
 | `LIVEKIT_API_SECRET` | Secret API correspondant de LiveKit |
 | `LIVEKIT_URL` | URL WebSocket LiveKit en `wss://` |
 | `CLOUDINARY_CLOUD_NAME` | Nom du cloud Cloudinary utilisé par l'API de publication |

@@ -15,7 +15,7 @@ const productionEnv = {
   SMS_DELIVERY_URL: "https://sms.example.invalid/send",
   SMS_DELIVERY_TOKEN: "fake-sms-token",
   GOOGLE_CLIENT_ID: "fake-google-client-id",
-  LIVEKIT_API_KEY: "AP_testUnitKey12345",
+  LIVEKIT_API_KEY: "APITestUnitKey12345",
   LIVEKIT_API_SECRET:
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   LIVEKIT_URL: "wss://quartierplus.livekit.cloud",
@@ -53,7 +53,7 @@ test("Cloudinary and LiveKit values are trimmed and unquoted", () => {
         CLOUDINARY_CLOUD_NAME: '  "quartierplus"  ',
         CLOUDINARY_API_KEY: " 'cloud-key' ",
         CLOUDINARY_API_SECRET: '"cloud-secret"',
-        LIVEKIT_API_KEY: ' "AP_testUnitKey12345" ',
+        LIVEKIT_API_KEY: ' "APITestUnitKey12345" ',
         LIVEKIT_API_SECRET: ` "${productionEnv.LIVEKIT_API_SECRET}" `,
         LIVEKIT_URL: ' "wss://quartierplus.livekit.cloud" ',
         DOTENV_CONFIG_PATH: "/dev/null",
@@ -66,7 +66,7 @@ test("Cloudinary and LiveKit values are trimmed and unquoted", () => {
     "quartierplus",
     "cloud-key",
     "cloud-secret",
-    "AP_testUnitKey12345",
+    "APITestUnitKey12345",
     productionEnv.LIVEKIT_API_SECRET,
     "wss://quartierplus.livekit.cloud",
   ]);
@@ -171,10 +171,33 @@ test("LiveKit API key diagnostics identify format failures without exposing the 
     },
   );
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /must start with the API prefix AP_/);
-  assert.match(result.stdout, /at least 11 characters/);
-  assert.match(result.stdout, /internal spaces and unmatched quotes are not allowed/);
+  assert.match(result.stdout, /must match \/\^API/);
   assert.equal(result.stdout.includes(invalidKey), false);
+});
+
+test("production environment accepts a trimmed and quoted API-prefixed LiveKit key", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      "import { env } from './config/env.js'; console.log(JSON.stringify({ usable: env.livekitConfigurationIsUsable, key: env.livekitApiKey }))",
+    ],
+    {
+      cwd: serverDirectory,
+      env: {
+        ...productionEnv,
+        LIVEKIT_API_KEY: '  "APITY2z_a-real-key"  ',
+        DOTENV_CONFIG_PATH: "/dev/null",
+      },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    usable: true,
+    key: "APITY2z_a-real-key",
+  });
 });
 
 test("production environment remains available with partial Cloudinary settings", () => {

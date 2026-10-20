@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { test } from "node:test";
 
 process.env.NODE_ENV = "test";
@@ -231,13 +232,19 @@ test("paid ticket webhook issues one ticket only after verified payment", async 
     },
   });
   const response = createResponse();
+  const body = { name: "transaction.approved", entity: { id: 456 } };
+  const rawBody = Buffer.from(JSON.stringify(body));
+  const signature = createHmac("sha256", process.env.FEDAPAY_WEBHOOK_SECRET)
+    .update(rawBody)
+    .digest("hex");
   const request = {
+    body,
+    rawBody,
     get(name) {
-      return name === "x-fedapay-webhook-secret"
-        ? process.env.FEDAPAY_WEBHOOK_SECRET
+      return name === "x-fedapay-signature"
+        ? `sha256=${signature}`
         : undefined;
     },
-    body: { name: "transaction.approved", entity: { id: 456 } },
   };
   try {
     await handleFedaPayWebhook(request, response, (error) => { throw error; });

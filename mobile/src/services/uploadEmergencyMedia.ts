@@ -53,13 +53,13 @@ export const uploadEmergencyMedia = async (
     payload.resource_type !== mediaKind
   ) {
     const message =
-      isRecord(payload) && typeof payload.error === "string"
-        ? payload.error
+      isRecord(payload) && typeof payload.reason === "string"
+        ? payload.reason
+        : isRecord(payload) && typeof payload.error === "string"
+          ? payload.error
         : "Impossible de préparer le média d'urgence.";
     throw new MediaUploadError(
-      message.startsWith("Le téléversement média n'est pas configuré")
-        ? message
-        : "Le serveur n'a pas pu préparer le téléversement du média d'urgence.",
+      message,
       `Étape : signature\nURL : ${signUrl}\nStatut HTTP : ${response.status}\nMessage : ${message}`,
     );
   }

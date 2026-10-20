@@ -1,12 +1,17 @@
 import { createHash } from "node:crypto";
 import { env } from "../config/env.js";
 
-const POSTS_FOLDER = "quartierplus/posts";
+const redactCloudinarySecrets = (message) => {
+  let safe = message;
+  for (const secret of [env.cloudinaryApiSecret, env.cloudinaryApiKey]) {
+    if (secret) safe = safe.replaceAll(secret, "[masqué]");
+  }
+  return safe;
+};
 
 export const isCloudinaryPublicIdOwnedByUser = (userId, publicId) =>
   typeof publicId === "string" &&
-  (publicId.startsWith(`${userId}_`) ||
-    publicId.startsWith(`${POSTS_FOLDER}/${userId}_`));
+  publicId.split("/").at(-1)?.startsWith(`${userId}_`);
 
 const requireCloudinaryConfiguration = () => {
   const missingVariables = [
@@ -19,10 +24,10 @@ const requireCloudinaryConfiguration = () => {
   if (missingVariables.length > 0) {
     const details = `Variable(s) manquante(s) : ${missingVariables.join(", ")}.`;
     console.error("Cloudinary media upload is unavailable:", details);
-    const error = new Error(
-      `Le téléversement média n'est pas configuré. ${details}`,
-    );
+    const error = new Error(`Cloudinary n'est pas configuré. ${details}`);
     error.status = 503;
+    error.code = "CLOUDINARY_CONFIGURATION_MISSING";
+    error.reason = `${details} (code ${error.code}).`;
     throw error;
   }
 };
@@ -38,6 +43,7 @@ const getCloudinaryErrorMessage = async (response) => {
   } catch {
     if (!message) message = "Réponse Cloudinary vide.";
   }
+  message = redactCloudinarySecrets(message);
   console.error("Cloudinary API refused a media request:", {
     status: response.status,
     message,
@@ -92,6 +98,8 @@ export const getCloudinaryAsset = async (resourceType, publicId) => {
       `Cloudinary a refusé la vérification du média (HTTP ${response.status}) : ${message}`,
     );
     error.status = 502;
+    error.code = `CLOUDINARY_HTTP_${response.status}`;
+    error.reason = `${error.message} (code ${error.code}).`;
     throw error;
   }
   return response.json();
@@ -119,6 +127,8 @@ export const deleteCloudinaryAsset = async (resourceType, publicId) => {
       `Cloudinary a refusé la suppression des métadonnées GPS (HTTP ${response.status}) : ${message}`,
     );
     error.status = 502;
+    error.code = `CLOUDINARY_HTTP_${response.status}`;
+    error.reason = `${error.message} (code ${error.code}).`;
     throw error;
   }
 };

@@ -171,15 +171,13 @@ export const uploadCloudinaryMedia = async (
     }
     const expectedPublicId = signature.public_id;
     const receivedPublicId = result?.public_id;
-    const folderPrefix = `${signature.folder.replace(/\/+$/, "")}/`;
     if (!result || typeof receivedPublicId !== "string" || !receivedPublicId) {
       throw new Error("Cloudinary n'a pas renvoyé d'identifiant public.");
     }
-    if (
-      receivedPublicId !== expectedPublicId &&
-      receivedPublicId !== `${folderPrefix}${expectedPublicId}`
-    ) {
-      throw new Error("Cloudinary a renvoyé un identifiant public inattendu.");
+    if (receivedPublicId.split("/").at(-1) !== expectedPublicId.split("/").at(-1)) {
+      throw new Error(
+        `Cloudinary a renvoyé un identifiant public inattendu (code CLOUDINARY_PUBLIC_ID_MISMATCH). Attendu : ${expectedPublicId} ; reçu : ${receivedPublicId}.`,
+      );
     }
     return {
       publicId: receivedPublicId,
@@ -200,6 +198,13 @@ export const uploadCloudinaryMedia = async (
       `public_id reçu : ${result?.public_id ?? "absent"}`,
       `Statut HTTP : ${status ?? "indisponible"}`,
       `Message Cloudinary : ${message}`,
+      `Code : ${
+        status
+          ? `CLOUDINARY_HTTP_${status}`
+          : message.includes("CLOUDINARY_PUBLIC_ID_MISMATCH")
+            ? "CLOUDINARY_PUBLIC_ID_MISMATCH"
+            : "CLOUDINARY_UPLOAD_FAILED"
+      }`,
     ].join("\n");
     console.error("Cloudinary upload failed:", {
       resourceType: signature.resource_type,
@@ -217,7 +222,7 @@ export const uploadCloudinaryMedia = async (
     );
     throw new MediaUploadError(
       status
-        ? `Cloudinary a refusé le téléversement (HTTP ${status}) : ${message}`
+        ? `Cloudinary a refusé le téléversement (HTTP ${status}, code CLOUDINARY_HTTP_${status}) : ${message}`
         : `Le téléversement Cloudinary a échoué : ${message}`,
       technicalDetails,
     );

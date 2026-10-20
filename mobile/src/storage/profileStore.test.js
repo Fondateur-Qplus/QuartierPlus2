@@ -12,7 +12,7 @@ jest.mock("../services/database", () => ({
 }));
 
 const { getSharedDatabase } = require("../services/database");
-const { openProfileStore } = require("./profileStore");
+const { getProfileStorageDiagnostic, openProfileStore } = require("./profileStore");
 
 describe("profile storage fallback", () => {
   it("retries failed SQLite initialization and keeps profile changes in memory", async () => {
@@ -22,6 +22,8 @@ describe("profile storage fallback", () => {
       const store = await openProfileStore();
       expect(getSharedDatabase).toHaveBeenCalledTimes(3);
       expect(store.isMemoryFallback).toBe(true);
+      expect(getProfileStorageDiagnostic()).toContain("Module : expo-sqlite");
+      expect(getProfileStorageDiagnostic()).toContain("SQLite unavailable");
 
       const country = {
         code: "BF",
