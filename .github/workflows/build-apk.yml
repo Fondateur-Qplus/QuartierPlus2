@@ -119,12 +119,42 @@ jobs:
           EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
           EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_PROJECT_ID || secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
           EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
-          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
-          EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID || secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
+          GITHUB_EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          GITHUB_EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
+          GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          GITHUB_EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID || secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID_SOURCE: ${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID != '' && 'variable GitHub' || secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID != '' && 'secret GitHub' || 'absente' }}
+          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID_SOURCE: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID != '' && 'variable GitHub' || secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID != '' && 'secret GitHub' || 'absente' }}
+          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID_SOURCE: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID != '' && 'variable GitHub' || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID != '' && 'secret GitHub' || 'absente' }}
+          EXPO_PUBLIC_EAS_PROJECT_ID_SOURCE: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID != '' && 'variable GitHub' || secrets.EXPO_PUBLIC_EAS_PROJECT_ID != '' && 'secret GitHub' || 'absente' }}
           EXPO_PUBLIC_LIVEKIT_URL: ${{ vars.EXPO_PUBLIC_LIVEKIT_URL || secrets.EXPO_PUBLIC_LIVEKIT_URL || 'wss://quartierplus-98gp8fx8.livekit.cloud' }}
         run: |
+          export EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID="$GITHUB_EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID"
+          export EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID="$GITHUB_EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID"
+          if [ -n "$GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" ]; then
+            export EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID="$GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID"
+          else
+            unset EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+          fi
+          APP_EAS_PROJECT_ID="$(node -p "require('./mobile/app.json').expo?.extra?.eas?.projectId?.trim() ?? ''")"
+          if [ -n "$APP_EAS_PROJECT_ID" ]; then
+            export EXPO_PUBLIC_EAS_PROJECT_ID="$APP_EAS_PROJECT_ID"
+            EAS_PROJECT_ID_SOURCE="app.json"
+          else
+            export EXPO_PUBLIC_EAS_PROJECT_ID="$GITHUB_EXPO_PUBLIC_EAS_PROJECT_ID"
+            EAS_PROJECT_ID_SOURCE="$EXPO_PUBLIC_EAS_PROJECT_ID_SOURCE"
+          fi
+          echo "EXPO_PUBLIC_EAS_PROJECT_ID source: $EAS_PROJECT_ID_SOURCE"
+          echo "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID source: $EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID_SOURCE"
+          echo "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID source: $EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID_SOURCE"
+          echo "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID source: $EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID_SOURCE"
+          if [ -n "$EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" ] && ! node -e '
+            process.exit(/^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? "") ? 0 : 1);
+          '; then
+            echo "::warning::EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID invalide ; la connexion Google iOS ne sera pas configurée."
+            unset EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+          fi
+
           GOOGLE_SERVICES_FILE=mobile/google-services.json
           if [ ! -f "$GOOGLE_SERVICES_FILE" ]; then
             echo "::error::google-services.json absent."
@@ -233,13 +263,6 @@ jobs:
             process.exit(1);
           }
 
-          const androidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
-          const androidClientProjectNumber = androidClientId.match(/^(\d+)-/i)?.[1];
-          if (androidClientProjectNumber && projectNumber && androidClientProjectNumber !== projectNumber) {
-            console.warn(
-              `::warning::Le numéro de projet du client EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID (${androidClientProjectNumber}) diffère du project_number de google-services.json (${projectNumber}).`,
-            );
-          }
           NODE
           FIREBASE_PROJECT_ID="$(node -p "require('./mobile/google-services.json').project_info.project_id")"
           if printf '%s' "$EXPO_PUBLIC_FIREBASE_PROJECT_ID" | grep -q '[^[:space:]]' && [ "$FIREBASE_PROJECT_ID" != "$EXPO_PUBLIC_FIREBASE_PROJECT_ID" ]; then
@@ -278,18 +301,50 @@ jobs:
           '; then
             exit 1
           fi
+          if ! node <<'NODE'
+          const config = require("./mobile/google-services.json");
+          const packageName = require("./mobile/app.json").expo.android.package;
+          const clientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
+          const projectNumber = String(config.project_info.project_number ?? "");
+          const clients = (Array.isArray(config.client) ? config.client : []).flatMap(
+            (client) => Array.isArray(client.oauth_client) ? client.oauth_client : [],
+          );
+          const matchingAndroidClient = clients.some(
+            (client) =>
+              client.client_type === 1 &&
+              client.client_id === clientId &&
+              client.android_info?.package_name === packageName,
+          );
+          const clientProjectNumber = clientId.match(/^(\d+)-/)?.[1];
+
+          if (!matchingAndroidClient) {
+            console.error(
+              "::error::EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID n’est pas présent dans google-services.json pour le package Android configuré.",
+            );
+            process.exit(1);
+          }
+          if (!clientProjectNumber || clientProjectNumber !== projectNumber) {
+            console.error(
+              "::error::EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ne vient pas du même projet que google-services.json.",
+            );
+            process.exit(1);
+          }
+          NODE
+          then
+            exit 1
+          fi
           if ! printf '%s' "$EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" | grep -q '[^[:space:]]'; then
             echo "::warning::EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID absent ; la connexion Google iOS ne sera pas configurée."
-          elif [ "$EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" = "your-google-ios-client-id.apps.googleusercontent.com" ]; then
-            echo "::warning::EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID contient encore la valeur d’exemple ; la connexion Google iOS ne sera pas configurée."
           fi
-          if ! printf '%s' "$EXPO_PUBLIC_EAS_PROJECT_ID" | grep -q '[^[:space:]]'; then
-            echo "::warning::EXPO_PUBLIC_EAS_PROJECT_ID absent ; l’application utilisera l’identifiant EAS défini dans app.json."
-          elif [ "$EXPO_PUBLIC_EAS_PROJECT_ID" = "00000000-0000-0000-0000-000000000000" ] || [ "$EXPO_PUBLIC_EAS_PROJECT_ID" = "your-google-ios-client-id" ]; then
-            echo "::error::EXPO_PUBLIC_EAS_PROJECT_ID contient une valeur d’exemple."
-            exit 1
-          elif [ "$EXPO_PUBLIC_EAS_PROJECT_ID" != "fe1302fc-1f61-4787-96c3-5fbf4948737b" ]; then
-            echo "::error::EXPO_PUBLIC_EAS_PROJECT_ID ne correspond pas au projet quartierplus."
+          if ! node -e '
+            const id = process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? "";
+            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+            const isAllZero = /^0{8}-0{4}-0{4}-0{4}-0{12}$/.test(id);
+            if (!id || !isUuid || isAllZero) {
+              console.error("::error::Identifiant EAS absent ou factice : renseignez extra.eas.projectId dans app.json ou EXPO_PUBLIC_EAS_PROJECT_ID dans GitHub.");
+              process.exit(1);
+            }
+          '; then
             exit 1
           fi
           if ! printf '%s' "$EXPO_PUBLIC_LIVEKIT_URL" | grep -q '[^[:space:]]'; then
@@ -307,12 +362,25 @@ jobs:
           EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
           EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
           EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
           EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
           EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID || secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
           EXPO_PUBLIC_LIVEKIT_URL: ${{ vars.EXPO_PUBLIC_LIVEKIT_URL || secrets.EXPO_PUBLIC_LIVEKIT_URL || 'wss://quartierplus-98gp8fx8.livekit.cloud' }}
         run: |
           cd mobile
+          if [ -n "$GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" ]; then
+            if [[ "$GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" =~ ^[0-9]+-[a-zA-Z0-9-]+\.apps\.googleusercontent\.com$ ]]; then
+              export EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID="$GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID"
+            else
+              unset EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+            fi
+          else
+            unset EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+          fi
+          APP_EAS_PROJECT_ID="$(node -p "require('./app.json').expo?.extra?.eas?.projectId?.trim() ?? ''")"
+          if [ -n "$APP_EAS_PROJECT_ID" ]; then
+            export EXPO_PUBLIC_EAS_PROJECT_ID="$APP_EAS_PROJECT_ID"
+          fi
           npx expo prebuild --clean --platform android
 
       - name: Configure Expo and EAS CLI
@@ -337,11 +405,24 @@ jobs:
           EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
           EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
           EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+          GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
           EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
           EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID || secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
           EXPO_PUBLIC_LIVEKIT_URL: ${{ vars.EXPO_PUBLIC_LIVEKIT_URL || secrets.EXPO_PUBLIC_LIVEKIT_URL || 'wss://quartierplus-98gp8fx8.livekit.cloud' }}
         run: |
+          if [ -n "$GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" ]; then
+            if [[ "$GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" =~ ^[0-9]+-[a-zA-Z0-9-]+\.apps\.googleusercontent\.com$ ]]; then
+              export EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID="$GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID"
+            else
+              unset EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+            fi
+          else
+            unset EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+          fi
+          APP_EAS_PROJECT_ID="$(node -p "require('./app.json').expo?.extra?.eas?.projectId?.trim() ?? ''")"
+          if [ -n "$APP_EAS_PROJECT_ID" ]; then
+            export EXPO_PUBLIC_EAS_PROJECT_ID="$APP_EAS_PROJECT_ID"
+          fi
           BUILD_JSON="$(eas build --platform android --profile preview --non-interactive --wait --json)"
           BUILD_URL="$(BUILD_JSON="$BUILD_JSON" node <<'NODE'
           const result = JSON.parse(process.env.BUILD_JSON);

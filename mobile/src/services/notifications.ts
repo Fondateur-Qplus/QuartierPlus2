@@ -21,9 +21,9 @@ Notifications.setNotificationHandler({
 });
 
 const projectId =
-  process.env.EXPO_PUBLIC_EAS_PROJECT_ID ??
   Constants.easConfig?.projectId ??
-  Constants.expoConfig?.extra?.eas?.projectId;
+  Constants.expoConfig?.extra?.eas?.projectId ??
+  process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
 
 export const registerPushNotifications = async (
   userId: string,

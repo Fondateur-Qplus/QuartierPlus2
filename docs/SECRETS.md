@@ -92,6 +92,10 @@ EXPO_PUBLIC_LIVEKIT_URL
 Les workflows acceptent ces valeurs comme GitHub Actions Variables ou Secrets.
 Pour une mise à jour OTA, configurez aussi les valeurs client dans
 l'environnement EAS `preview` utilisé par `eas update --environment preview`.
+`mobile/app.json` contient déjà l'identifiant EAS à
+`expo.extra.eas.projectId` ; c'est la source prioritaire pour les builds et les
+mises à jour OTA. `EXPO_PUBLIC_EAS_PROJECT_ID` n'est nécessaire que si cet
+identifiant est absent du fichier.
 
 Secrets GitHub réservés aux workflows :
 
@@ -110,7 +114,9 @@ la valeur fournie par le secret pendant le build. La connexion Google iOS est
 facultative pour le build Android : l'absence de
 `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` génère un avertissement seulement.
 `EXPO_PUBLIC_EAS_PROJECT_ID`, lorsqu'il est défini dans GitHub, ne doit pas être
-une valeur d'exemple et doit correspondre à l'identifiant EAS du projet.
+une valeur d'exemple. Le workflow consigne uniquement si chaque identifiant
+Google/EAS provient d'une variable GitHub, d'un secret GitHub ou de `app.json`,
+jamais sa valeur.
 
 ## Configuration Google requise
 
@@ -127,13 +133,16 @@ client OAuth Android avec le package et le SHA-1 exacts, ainsi qu'un client OAut
 Web. `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` doit contenir le client Web ;
 `GOOGLE_CLIENT_ID` sur Render doit accepter ce même ID.
 `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` doit contenir l'ID client Android du
-même numéro de projet que `google-services.json`. Le client Web est utilisé
+projet `project_number` de `google-services.json` et figurer comme client OAuth
+Android pour le package configuré dans ce fichier. Le workflow échoue si le
+client manque ou si son numéro de projet diffère. Le client Web est utilisé
 comme audience du jeton d'identité ; le client Android et son certificat sont
 configurés nativement via `google-services.json`. iOS n'est pas publié pour le
 moment ; si un build iOS est ajouté, configurez
 `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` comme client OAuth iOS associé. Pour iOS,
 `mobile/app.config.js` dérive le schéma URL de retour Google de cet ID et
-l'ajoute au binaire.
+l'ajoute au binaire. Pour le build Android, son absence reste un avertissement
+et la variable n'est pas transmise aux commandes Expo/EAS lorsqu'elle est vide.
 L'erreur Android `10` / `DEVELOPER_ERROR` indique généralement un client OAuth,
 un package ou une empreinte SHA manquante/incohérente. Ne transmettez pas le
 keystore ni sa clé privée à Firebase, GitHub variables ou au dépôt.
