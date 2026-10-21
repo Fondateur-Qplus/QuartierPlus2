@@ -89,7 +89,10 @@ EXPO_PUBLIC_EAS_PROJECT_ID
 EXPO_PUBLIC_LIVEKIT_URL
 ```
 
-Les workflows acceptent ces valeurs comme GitHub Actions Variables ou Secrets.
+Les workflows acceptent les valeurs client comme GitHub Actions Variables ou
+Secrets, à l'exception des identifiants Google Android/Web et du project ID
+Firebase : le workflow APK les extrait de `mobile/google-services.json` et
+remplace les valeurs GitHub présentes.
 Pour une mise à jour OTA, configurez aussi les valeurs client dans
 l'environnement EAS `preview` utilisé par `eas update --environment preview`.
 `mobile/app.json` contient déjà l'identifiant EAS à
@@ -105,14 +108,19 @@ EXPO_TOKEN
 ```
 
 `GOOGLE_SERVICES_JSON` est écrit temporairement dans `mobile/google-services.json`
-par le workflow APK ; le contenu n'est pas imprimé. `EXPO_TOKEN` est passé à EAS
-et n'est pas affiché. Les workflows ne doivent jamais activer `set -x` ou imprimer
-une valeur de secret.
+par le workflow APK ; le contenu n'est pas imprimé. Le client OAuth Android
+client_type 1 du package `expo.android.package`, le client Web client_type 3,
+`project_number` et `project_id` de ce fichier font autorité. Les deux identifiants
+Google et `EXPO_PUBLIC_FIREBASE_PROJECT_ID` sont exportés depuis ce fichier et
+leur origine est consignée sans afficher leur valeur complète.
+`EXPO_TOKEN` est passé à EAS et n'est pas affiché. Les workflows ne doivent jamais
+activer `set -x` ou imprimer une valeur de secret.
 Le workflow écrit le secret après le checkout et valide ensuite ce fichier ;
 la présence de `mobile/google-services.json` dans le dépôt ne remplace donc pas
 la valeur fournie par le secret pendant le build. La connexion Google iOS est
-facultative pour le build Android : l'absence de
-`EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` génère un avertissement seulement.
+facultative pour le build Android : l'absence ou l'invalidité de
+`EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` génère un avertissement et la valeur n'est pas
+transmise.
 `EXPO_PUBLIC_EAS_PROJECT_ID`, lorsqu'il est défini dans GitHub, ne doit pas être
 une valeur d'exemple. Le workflow consigne uniquement si chaque identifiant
 Google/EAS provient d'une variable GitHub, d'un secret GitHub ou de `app.json`,
@@ -132,13 +140,17 @@ Dans Google Cloud Console → API et services → Identifiants, créez/vérifiez
 client OAuth Android avec le package et le SHA-1 exacts, ainsi qu'un client OAuth
 Web. `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` doit contenir le client Web ;
 `GOOGLE_CLIENT_ID` sur Render doit accepter ce même ID.
-`EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` doit contenir l'ID client Android du
-projet `project_number` de `google-services.json` et figurer comme client OAuth
-Android pour le package configuré dans ce fichier. Le workflow échoue si le
-client manque ou si son numéro de projet diffère. Le client Web est utilisé
-comme audience du jeton d'identité ; le client Android et son certificat sont
-configurés nativement via `google-services.json`. iOS n'est pas publié pour le
-moment ; si un build iOS est ajouté, configurez
+Les workflows de build utilisent le profil EAS `preview` et les variables de
+son environnement. Pour éviter qu'une ancienne valeur EAS ne prenne le dessus
+sur les identifiants extraits par GitHub Actions, supprimez ou corrigez dans
+expo.dev (environnement `preview`, ainsi que les variables au niveau compte si
+elles s'appliquent) les variables `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`,
+`EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` et `EXPO_PUBLIC_FIREBASE_PROJECT_ID`.
+Le client Android du bon package est exigé dans le fichier ; les erreurs dues
+aux IDs Web/iOS vides ou invalides restent limitées à la connexion Google.
+Le client Web est utilisé comme audience du jeton d'identité ; le client Android
+et son certificat sont configurés nativement via `google-services.json`.
+iOS n'est pas publié pour le moment ; si un build iOS est ajouté, configurez
 `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` comme client OAuth iOS associé. Pour iOS,
 `mobile/app.config.js` dérive le schéma URL de retour Google de cet ID et
 l'ajoute au binaire. Pour le build Android, son absence reste un avertissement

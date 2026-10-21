@@ -39,10 +39,79 @@ jobs:
           fs.writeFileSync("mobile/google-services.json", contents, { mode: 0o600 });
           NODE
 
+      - name: Extract Google OAuth clients from Firebase configuration
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const file = "mobile/google-services.json";
+          let config;
+          try {
+            config = JSON.parse(fs.readFileSync(file, "utf8"));
+          } catch {
+            console.error("::error::Le fichier mobile/google-services.json est invalide.");
+            process.exit(1);
+          }
+
+          const root = config && typeof config === "object" ? config : {};
+          const packageName = require("./mobile/app.json").expo?.android?.package;
+          const oauthClients = (Array.isArray(root.client) ? root.client : []).flatMap(
+            (client) => Array.isArray(client.oauth_client) ? client.oauth_client : [],
+          );
+          const androidClient = oauthClients.find(
+            (client) =>
+              client.client_type === 1 &&
+              client.android_info?.package_name === packageName &&
+              typeof client.client_id === "string" &&
+              client.client_id.trim(),
+          );
+          const webClient = oauthClients.find(
+            (client) =>
+              client.client_type === 3 &&
+              typeof client.client_id === "string" &&
+              client.client_id.trim(),
+          );
+          const projectNumber = String(root.project_info?.project_number ?? "");
+          const projectId = String(root.project_info?.project_id ?? "");
+
+          console.log(`Chemin lu : ${file}`);
+          console.log(`Entrées oauth_client : ${oauthClients.length}`);
+          console.log(`package_name : ${packageName ?? "absent"}`);
+          console.log(`project_number : ${projectNumber || "absent"}`);
+          console.log(`project_id : ${projectId || "absent"}`);
+          console.log(`Client Android (12 premiers caractères) : ${androidClient?.client_id.slice(0, 12) ?? "absent"}`);
+          console.log(`Client Web (12 premiers caractères) : ${webClient?.client_id.slice(0, 12) ?? "absent"}`);
+
+          if (!androidClient) {
+            console.error(
+              `::error::Client OAuth Android client_type 1 absent de ${file} pour le package ${packageName ?? "absent"}.`,
+            );
+            process.exit(1);
+          }
+
+          const env = [
+            ["EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID", androidClient.client_id.trim()],
+            ["EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID", webClient?.client_id.trim() ?? ""],
+            ["EXPO_PUBLIC_FIREBASE_PROJECT_ID", projectId],
+            ["FIREBASE_PROJECT_NUMBER", projectNumber],
+            ["FIREBASE_PROJECT_ID", projectId],
+          ];
+          fs.appendFileSync(
+            process.env.GITHUB_ENV,
+            `${env.map(([name, value]) => `${name}=${value}`).join("\n")}\n`,
+          );
+          for (const [name] of env) {
+            const origin =
+              name === "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID" && !webClient
+                ? "absente de google-services.json"
+                : "google-services.json";
+            console.log(`${name} origine finale : ${origin}`);
+          }
+          NODE
+
       - name: 🔎 Vérifier l’URL et la disponibilité de l’API
         env:
           EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
-          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_PROJECT_ID || secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
           EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
         run: |
           MISSING_CONFIG=""
@@ -117,24 +186,23 @@ jobs:
       - name: Validate Firebase and app configuration
         env:
           EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
-          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_PROJECT_ID || secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
           EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
-          GITHUB_EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
-          GITHUB_EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
           GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
           GITHUB_EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID || secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
-          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID_SOURCE: ${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID != '' && 'variable GitHub' || secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID != '' && 'secret GitHub' || 'absente' }}
-          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID_SOURCE: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID != '' && 'variable GitHub' || secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID != '' && 'secret GitHub' || 'absente' }}
           EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID_SOURCE: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID != '' && 'variable GitHub' || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID != '' && 'secret GitHub' || 'absente' }}
           EXPO_PUBLIC_EAS_PROJECT_ID_SOURCE: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID != '' && 'variable GitHub' || secrets.EXPO_PUBLIC_EAS_PROJECT_ID != '' && 'secret GitHub' || 'absente' }}
           EXPO_PUBLIC_LIVEKIT_URL: ${{ vars.EXPO_PUBLIC_LIVEKIT_URL || secrets.EXPO_PUBLIC_LIVEKIT_URL || 'wss://quartierplus-98gp8fx8.livekit.cloud' }}
         run: |
-          export EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID="$GITHUB_EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID"
-          export EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID="$GITHUB_EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID"
           if [ -n "$GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" ]; then
-            export EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID="$GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID"
+            if [[ "$GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" =~ ^[0-9]+-[a-zA-Z0-9-]+\.apps\.googleusercontent\.com$ ]]; then
+              export EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID="$GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID"
+            else
+              echo "::warning::EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID invalide ; la connexion Google iOS ne sera pas configurée."
+              unset EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+            fi
           else
             unset EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+            echo "::warning::EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID absent ; la connexion Google iOS ne sera pas configurée."
           fi
           APP_EAS_PROJECT_ID="$(node -p "require('./mobile/app.json').expo?.extra?.eas?.projectId?.trim() ?? ''")"
           if [ -n "$APP_EAS_PROJECT_ID" ]; then
@@ -145,130 +213,15 @@ jobs:
             EAS_PROJECT_ID_SOURCE="$EXPO_PUBLIC_EAS_PROJECT_ID_SOURCE"
           fi
           echo "EXPO_PUBLIC_EAS_PROJECT_ID source: $EAS_PROJECT_ID_SOURCE"
-          echo "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID source: $EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID_SOURCE"
-          echo "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID source: $EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID_SOURCE"
-          echo "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID source: $EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID_SOURCE"
-          if [ -n "$EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" ] && ! node -e '
-            process.exit(/^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? "") ? 0 : 1);
-          '; then
-            echo "::warning::EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID invalide ; la connexion Google iOS ne sera pas configurée."
-            unset EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+          if [ -n "$EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" ]; then
+            IOS_CLIENT_ID_SOURCE="$EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID_SOURCE"
+          else
+            IOS_CLIENT_ID_SOURCE="absente ou invalide"
           fi
-
-          GOOGLE_SERVICES_FILE=mobile/google-services.json
-          if [ ! -f "$GOOGLE_SERVICES_FILE" ]; then
-            echo "::error::google-services.json absent."
-            exit 1
-          fi
-          node <<'NODE'
-          const fs = require("node:fs");
-
-          const file = "mobile/google-services.json";
-          const raw = fs.readFileSync(file, "utf8");
-          const invisible = /[\u200B-\u200F\u2060\uFEFF\u00A0]/g;
-          const cleaned = raw.replace(invisible, "");
-
-          if (cleaned.length === 0) {
-            console.log("Position de l’erreur de parse : non applicable");
-            console.error("::error::google-services.json vide.");
-            process.exit(1);
-          }
-
-          fs.writeFileSync(file, cleaned, "utf8");
-
-          let config;
-          try {
-            config = JSON.parse(cleaned);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : "";
-            const position =
-              message.match(/position\s+(\d+)/i)?.[1] ??
-              (() => {
-                const match = message.match(/line\s+(\d+)\s+column\s+(\d+)/i);
-                if (!match) return "inconnue";
-                const lines = cleaned.split("\n");
-                return String(
-                  lines
-                    .slice(0, Number(match[1]) - 1)
-                    .reduce((length, line) => length + line.length + 1, 0) +
-                    Number(match[2]) -
-                    1,
-                );
-              })();
-            console.log(`Position de l’erreur de parse : ${position}`);
-            console.error(
-              "::error::Le fichier mobile/google-services.json est invalide.",
-            );
-            process.exit(1);
-          }
-
-          if (typeof config.project_info?.project_id !== "string" || !config.project_info.project_id.trim()) {
-            console.error("::error::Clé manquante ou vide : project_info.project_id.");
-            process.exit(1);
-          }
-
-          if (
-            !Array.isArray(config.client) ||
-            config.client.length === 0 ||
-            config.client.some(
-              (client) =>
-                typeof client?.client_info?.android_client_info?.package_name !== "string" ||
-                !client.client_info.android_client_info.package_name.trim(),
-            )
-          ) {
-            console.error(
-              "::error::Clé manquante ou vide : client[].client_info.android_client_info.package_name.",
-            );
-            process.exit(1);
-          }
-          NODE
-
-          EXPECTED_PACKAGE="$(node -p "require('./mobile/app.json').expo.android.package")"
-          if [ -z "$EXPECTED_PACKAGE" ]; then
-            echo "::error::expo.android.package est absent de mobile/app.json."
-            exit 1
-          fi
-          if ! node -e "const config=require('./mobile/google-services.json'); if (!config.client.some((client) => client.client_info.android_client_info.package_name === process.argv[1])) process.exit(1)" "$EXPECTED_PACKAGE"; then
-            echo "::error::Le package_name de google-services.json ne correspond pas à expo.android.package dans mobile/app.json."
-            exit 1
-          fi
-          EXPECTED_PACKAGE="$EXPECTED_PACKAGE" node <<'NODE'
-          const config = require("./mobile/google-services.json");
-          const packageName = process.env.EXPECTED_PACKAGE;
-          const clients = Array.isArray(config.client) ? config.client : [];
-          const oauthClients = clients.flatMap((client) =>
-            Array.isArray(client.oauth_client) ? client.oauth_client : [],
-          );
-          const androidClient = oauthClients.find(
-            (oauth) =>
-              oauth.client_type === 1 &&
-              oauth.android_info?.package_name === packageName &&
-              typeof oauth.android_info?.certificate_hash === "string" &&
-              oauth.android_info.certificate_hash.length > 0,
-          );
-          const projectNumber = String(config.project_info.project_number ?? "");
-          const certificateHash = androidClient?.android_info.certificate_hash;
-
-          console.log(`Configuration Firebase lue : mobile/google-services.json`);
-          console.log(`Entrées oauth_client : ${oauthClients.length}`);
-          console.log(`Client OAuth Android client_type 1 : ${androidClient ? "présent" : "absent"}`);
-          console.log(`package_name attendu : ${packageName}`);
-          console.log(`project_id : ${config.project_info.project_id}`);
-          console.log(`certificate_hash (8 premiers caractères) : ${certificateHash ? certificateHash.slice(0, 8) : "absent"}`);
-
-          if (!androidClient) {
-            console.error(
-              "::error::Client OAuth Android client_type 1 absent de google-services.json pour le package attendu ; vérifiez dans Firebase le package et le SHA-1 du certificat EAS, puis remplacez le secret GOOGLE_SERVICES_JSON.",
-            );
-            process.exit(1);
-          }
-
-          NODE
-          FIREBASE_PROJECT_ID="$(node -p "require('./mobile/google-services.json').project_info.project_id")"
-          if printf '%s' "$EXPO_PUBLIC_FIREBASE_PROJECT_ID" | grep -q '[^[:space:]]' && [ "$FIREBASE_PROJECT_ID" != "$EXPO_PUBLIC_FIREBASE_PROJECT_ID" ]; then
-            echo "::error::google-services.json et EXPO_PUBLIC_FIREBASE_* ne viennent pas du même projet Firebase."
-            exit 1
-          fi
+          echo "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID origine finale : google-services.json"
+          echo "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID origine finale : google-services.json"
+          echo "EXPO_PUBLIC_FIREBASE_PROJECT_ID origine finale : google-services.json"
+          echo "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID origine finale : $IOS_CLIENT_ID_SOURCE"
 
           MISSING_CONFIG=""
           if ! printf '%s' "$EXPO_PUBLIC_FIREBASE_PROJECT_ID" | grep -q '[^[:space:]]'; then
@@ -280,61 +233,9 @@ jobs:
           if ! printf '%s' "$EXPO_PUBLIC_GOOGLE_MAPS_API_KEY" | grep -q '[^[:space:]]'; then
             MISSING_CONFIG="$MISSING_CONFIG EXPO_PUBLIC_GOOGLE_MAPS_API_KEY"
           fi
-          if ! printf '%s' "$EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID" | grep -q '[^[:space:]]'; then
-            MISSING_CONFIG="$MISSING_CONFIG EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID"
-          fi
-          if ! printf '%s' "$EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID" | grep -q '[^[:space:]]'; then
-            MISSING_CONFIG="$MISSING_CONFIG EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID"
-          fi
           if [ -n "$MISSING_CONFIG" ]; then
             echo "::error::Configuration de build absente ou vide :$MISSING_CONFIG."
             exit 1
-          fi
-          if ! node -e '
-            const valid = (value) => /^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(value);
-            for (const name of ["EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID", "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID"]) {
-              if (!valid(process.env[name])) {
-                console.error(`::error::${name} doit être un identifiant client OAuth Google valide.`);
-                process.exitCode = 1;
-              }
-            }
-          '; then
-            exit 1
-          fi
-          if ! node <<'NODE'
-          const config = require("./mobile/google-services.json");
-          const packageName = require("./mobile/app.json").expo.android.package;
-          const clientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
-          const projectNumber = String(config.project_info.project_number ?? "");
-          const clients = (Array.isArray(config.client) ? config.client : []).flatMap(
-            (client) => Array.isArray(client.oauth_client) ? client.oauth_client : [],
-          );
-          const matchingAndroidClient = clients.some(
-            (client) =>
-              client.client_type === 1 &&
-              client.client_id === clientId &&
-              client.android_info?.package_name === packageName,
-          );
-          const clientProjectNumber = clientId.match(/^(\d+)-/)?.[1];
-
-          if (!matchingAndroidClient) {
-            console.error(
-              "::error::EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID n’est pas présent dans google-services.json pour le package Android configuré.",
-            );
-            process.exit(1);
-          }
-          if (!clientProjectNumber || clientProjectNumber !== projectNumber) {
-            console.error(
-              "::error::EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ne vient pas du même projet que google-services.json.",
-            );
-            process.exit(1);
-          }
-          NODE
-          then
-            exit 1
-          fi
-          if ! printf '%s' "$EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" | grep -q '[^[:space:]]'; then
-            echo "::warning::EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID absent ; la connexion Google iOS ne sera pas configurée."
           fi
           if ! node -e '
             const id = process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? "";
@@ -356,14 +257,11 @@ jobs:
           EXPO_PUBLIC_GIT_SHA: ${{ github.sha }}
           EXPO_PUBLIC_FIREBASE_API_KEY: ${{ vars.EXPO_PUBLIC_FIREBASE_API_KEY || secrets.EXPO_PUBLIC_FIREBASE_API_KEY }}
           EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || secrets.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN }}
-          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_PROJECT_ID || secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
           EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
           EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID || secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
           EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
           EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
-          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
           GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
           EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID || secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
           EXPO_PUBLIC_LIVEKIT_URL: ${{ vars.EXPO_PUBLIC_LIVEKIT_URL || secrets.EXPO_PUBLIC_LIVEKIT_URL || 'wss://quartierplus-98gp8fx8.livekit.cloud' }}
         run: |
@@ -397,16 +295,13 @@ jobs:
           EXPO_PUBLIC_GIT_SHA: ${{ github.sha }}
           EXPO_PUBLIC_FIREBASE_API_KEY: ${{ vars.EXPO_PUBLIC_FIREBASE_API_KEY || secrets.EXPO_PUBLIC_FIREBASE_API_KEY }}
           EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || secrets.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN }}
-          EXPO_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_PROJECT_ID || secrets.EXPO_PUBLIC_FIREBASE_PROJECT_ID }}
           EXPO_PUBLIC_FIREBASE_APP_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_APP_ID || secrets.EXPO_PUBLIC_FIREBASE_APP_ID }}
           EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || secrets.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
           EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ vars.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID || secrets.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID }}
           EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET: ${{ vars.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || secrets.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET }}
           EXPO_PUBLIC_API_URL: ${{ vars.EXPO_PUBLIC_API_URL || secrets.EXPO_PUBLIC_API_URL || 'https://quartierplus-api.onrender.com' }}
           EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || secrets.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY }}
-          EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID }}
           GITHUB_EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
-          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: ${{ vars.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
           EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID || secrets.EXPO_PUBLIC_EAS_PROJECT_ID }}
           EXPO_PUBLIC_LIVEKIT_URL: ${{ vars.EXPO_PUBLIC_LIVEKIT_URL || secrets.EXPO_PUBLIC_LIVEKIT_URL || 'wss://quartierplus-98gp8fx8.livekit.cloud' }}
         run: |

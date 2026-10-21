@@ -5,8 +5,8 @@ const iosGoogleClientMatch = iosGoogleClientId.match(
 );
 
 if (iosGoogleClientId && !iosGoogleClientMatch) {
-  throw new Error(
-    "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID doit être un client OAuth Google valide.",
+  console.warn(
+    "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID invalide ; la configuration Google iOS est ignorée.",
   );
 }
 
