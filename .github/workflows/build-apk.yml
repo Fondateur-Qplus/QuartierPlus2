@@ -202,26 +202,45 @@ jobs:
             echo "::error::Le package_name de google-services.json ne correspond pas à expo.android.package dans mobile/app.json."
             exit 1
           fi
-          if ! EXPECTED_PACKAGE="$EXPECTED_PACKAGE" node <<'NODE'
+          EXPECTED_PACKAGE="$EXPECTED_PACKAGE" node <<'NODE'
           const config = require("./mobile/google-services.json");
           const packageName = process.env.EXPECTED_PACKAGE;
-          const hasAndroidOAuthClient = config.client.some(
-            (client) =>
-              client.client_info.android_client_info.package_name === packageName &&
-              client.oauth_client?.some(
-                (oauth) =>
-                  oauth.client_type === 3 &&
-                  oauth.android_info?.package_name === packageName &&
-                  typeof oauth.android_info.certificate_hash === "string" &&
-                  oauth.android_info.certificate_hash,
-              ),
+          const clients = Array.isArray(config.client) ? config.client : [];
+          const oauthClients = clients.flatMap((client) =>
+            Array.isArray(client.oauth_client) ? client.oauth_client : [],
           );
-          if (!hasAndroidOAuthClient) process.exit(1);
+          const androidClient = oauthClients.find(
+            (oauth) =>
+              oauth.client_type === 1 &&
+              oauth.android_info?.package_name === packageName &&
+              typeof oauth.android_info?.certificate_hash === "string" &&
+              oauth.android_info.certificate_hash.length > 0,
+          );
+          const projectNumber = String(config.project_info.project_number ?? "");
+          const certificateHash = androidClient?.android_info.certificate_hash;
+
+          console.log(`Configuration Firebase lue : mobile/google-services.json`);
+          console.log(`Entrées oauth_client : ${oauthClients.length}`);
+          console.log(`Client OAuth Android client_type 1 : ${androidClient ? "présent" : "absent"}`);
+          console.log(`package_name attendu : ${packageName}`);
+          console.log(`project_id : ${config.project_info.project_id}`);
+          console.log(`certificate_hash (8 premiers caractères) : ${certificateHash ? certificateHash.slice(0, 8) : "absent"}`);
+
+          if (!androidClient) {
+            console.error(
+              "::error::Client OAuth Android client_type 1 absent de google-services.json pour le package attendu ; vérifiez dans Firebase le package et le SHA-1 du certificat EAS, puis remplacez le secret GOOGLE_SERVICES_JSON.",
+            );
+            process.exit(1);
+          }
+
+          const androidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
+          const androidClientProjectNumber = androidClientId.match(/^(\d+)-/i)?.[1];
+          if (androidClientProjectNumber && projectNumber && androidClientProjectNumber !== projectNumber) {
+            console.warn(
+              `::warning::Le numéro de projet du client EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID (${androidClientProjectNumber}) diffère du project_number de google-services.json (${projectNumber}).`,
+            );
+          }
           NODE
-          then
-            echo "::error::Client OAuth Android absent de google-services.json ; ajoutez dans Firebase le package et le SHA-1 du certificat EAS, puis renouvelez GOOGLE_SERVICES_JSON."
-            exit 1
-          fi
           FIREBASE_PROJECT_ID="$(node -p "require('./mobile/google-services.json').project_info.project_id")"
           if printf '%s' "$EXPO_PUBLIC_FIREBASE_PROJECT_ID" | grep -q '[^[:space:]]' && [ "$FIREBASE_PROJECT_ID" != "$EXPO_PUBLIC_FIREBASE_PROJECT_ID" ]; then
             echo "::error::google-services.json et EXPO_PUBLIC_FIREBASE_* ne viennent pas du même projet Firebase."
@@ -248,11 +267,30 @@ jobs:
             echo "::error::Configuration de build absente ou vide :$MISSING_CONFIG."
             exit 1
           fi
+          if ! node -e '
+            const valid = (value) => /^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(value);
+            for (const name of ["EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID", "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID"]) {
+              if (!valid(process.env[name])) {
+                console.error(`::error::${name} doit être un identifiant client OAuth Google valide.`);
+                process.exitCode = 1;
+              }
+            }
+          '; then
+            exit 1
+          fi
           if ! printf '%s' "$EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" | grep -q '[^[:space:]]'; then
             echo "::warning::EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID absent ; la connexion Google iOS ne sera pas configurée."
+          elif [ "$EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID" = "your-google-ios-client-id.apps.googleusercontent.com" ]; then
+            echo "::warning::EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID contient encore la valeur d’exemple ; la connexion Google iOS ne sera pas configurée."
           fi
           if ! printf '%s' "$EXPO_PUBLIC_EAS_PROJECT_ID" | grep -q '[^[:space:]]'; then
             echo "::warning::EXPO_PUBLIC_EAS_PROJECT_ID absent ; l’application utilisera l’identifiant EAS défini dans app.json."
+          elif [ "$EXPO_PUBLIC_EAS_PROJECT_ID" = "00000000-0000-0000-0000-000000000000" ] || [ "$EXPO_PUBLIC_EAS_PROJECT_ID" = "your-google-ios-client-id" ]; then
+            echo "::error::EXPO_PUBLIC_EAS_PROJECT_ID contient une valeur d’exemple."
+            exit 1
+          elif [ "$EXPO_PUBLIC_EAS_PROJECT_ID" != "fe1302fc-1f61-4787-96c3-5fbf4948737b" ]; then
+            echo "::error::EXPO_PUBLIC_EAS_PROJECT_ID ne correspond pas au projet quartierplus."
+            exit 1
           fi
           if ! printf '%s' "$EXPO_PUBLIC_LIVEKIT_URL" | grep -q '[^[:space:]]'; then
             echo "::warning::EXPO_PUBLIC_LIVEKIT_URL absent ; les fonctionnalités LiveKit seront indisponibles."

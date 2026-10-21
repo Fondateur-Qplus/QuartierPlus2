@@ -65,7 +65,7 @@ jobs:
           ')" || exit 1
 
           if [ -n "$EXPO_PUBLIC_EAS_PROJECT_ID" ] && [ "$EXPO_PUBLIC_EAS_PROJECT_ID" != "fe1302fc-1f61-4787-96c3-5fbf4948737b" ]; then
-            echo "::error::EXPO_PUBLIC_EAS_PROJECT_ID ne correspond pas au projet quartierplus."
+            echo "::error::EXPO_PUBLIC_EAS_PROJECT_ID est invalide ou contient une valeur d’exemple ; il doit correspondre au projet quartierplus."
             exit 1
           fi
 

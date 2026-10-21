@@ -27,11 +27,10 @@ const initialConfigurationError = (() => {
   ) {
     return "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID invalide (code GOOGLE_ANDROID_CLIENT_ID_INVALID).";
   }
-  if (Platform.OS === "ios" && !googleIosClientId) {
-    return "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID manquant pour iOS (code GOOGLE_IOS_CLIENT_ID_MISSING).";
-  }
   if (Platform.OS === "ios" && !validGoogleClientId(googleIosClientId)) {
-    return "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID invalide (code GOOGLE_IOS_CLIENT_ID_INVALID).";
+    if (googleIosClientId) {
+      return "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID invalide (code GOOGLE_IOS_CLIENT_ID_INVALID).";
+    }
   }
   return null;
 })();
@@ -53,7 +52,13 @@ const googleErrorMessage = (error: unknown) => {
       : null;
   if (typeof responseData === "object" && responseData !== null) {
     const data = responseData as Record<string, unknown>;
-    if (typeof data.reason === "string") return data.reason;
+    for (const key of ["reason", "error", "message", "detail"]) {
+      if (typeof data[key] === "string" && data[key].trim()) {
+        const status =
+          typeof record?.status === "number" ? ` (HTTP ${record.status})` : "";
+        return `${data[key]}${status}`;
+      }
+    }
   }
   const rawMessage =
     error instanceof Error
@@ -62,7 +67,7 @@ const googleErrorMessage = (error: unknown) => {
         ? record.message
         : "Erreur Google inconnue.";
   if (code === "10" || /DEVELOPER_ERROR/i.test(rawMessage)) {
-    return "Google OAuth refuse cette application (code 10 / DEVELOPER_ERROR). Vérifiez le package Android et les SHA-1/SHA-256 du certificat EAS dans Firebase, ainsi que le client OAuth Android correspondant dans Google Cloud Console.";
+    return `Google OAuth refuse cette application : ${rawMessage} (code 10 / DEVELOPER_ERROR). Vérifiez le package Android et les SHA-1/SHA-256 du certificat EAS dans Firebase, ainsi que le client OAuth Android correspondant dans Google Cloud Console.`;
   }
   return `Google : ${rawMessage} (code ${code}).`;
 };
@@ -94,7 +99,12 @@ export default function GoogleAuthScreen() {
       const { GoogleSignin } = await import("@react-native-google-signin/google-signin");
       GoogleSignin.configure({
         webClientId: googleWebClientId,
-        ...(Platform.OS === "ios" ? { iosClientId: googleIosClientId } : {}),
+        ...(Platform.OS === "android" && googleAndroidClientId
+          ? { androidClientId: googleAndroidClientId }
+          : {}),
+        ...(Platform.OS === "ios" && googleIosClientId
+          ? { iosClientId: googleIosClientId }
+          : {}),
       });
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       const result = await GoogleSignin.signIn();

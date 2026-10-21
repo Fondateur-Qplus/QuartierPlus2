@@ -104,6 +104,13 @@ EXPO_TOKEN
 par le workflow APK ; le contenu n'est pas imprimé. `EXPO_TOKEN` est passé à EAS
 et n'est pas affiché. Les workflows ne doivent jamais activer `set -x` ou imprimer
 une valeur de secret.
+Le workflow écrit le secret après le checkout et valide ensuite ce fichier ;
+la présence de `mobile/google-services.json` dans le dépôt ne remplace donc pas
+la valeur fournie par le secret pendant le build. La connexion Google iOS est
+facultative pour le build Android : l'absence de
+`EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` génère un avertissement seulement.
+`EXPO_PUBLIC_EAS_PROJECT_ID`, lorsqu'il est défini dans GitHub, ne doit pas être
+une valeur d'exemple et doit correspondre à l'identifiant EAS du projet.
 
 ## Configuration Google requise
 
@@ -119,12 +126,14 @@ Dans Google Cloud Console → API et services → Identifiants, créez/vérifiez
 client OAuth Android avec le package et le SHA-1 exacts, ainsi qu'un client OAuth
 Web. `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` doit contenir le client Web ;
 `GOOGLE_CLIENT_ID` sur Render doit accepter ce même ID.
-`EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` doit contenir l'ID client Android.
-Pour iOS, le bundle configuré est `com.anonymous.quartierplus` et
-`EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` doit être le client OAuth iOS associé.
-Lors d'un build iOS, `mobile/app.config.js` dérive le schéma URL de retour
-Google de cet ID et l'ajoute au binaire ; configurez-le dans GitHub Actions et
-dans l'environnement EAS utilisé pour le build.
+`EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` doit contenir l'ID client Android du
+même numéro de projet que `google-services.json`. Le client Web est utilisé
+comme audience du jeton d'identité ; le client Android et son certificat sont
+configurés nativement via `google-services.json`. iOS n'est pas publié pour le
+moment ; si un build iOS est ajouté, configurez
+`EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` comme client OAuth iOS associé. Pour iOS,
+`mobile/app.config.js` dérive le schéma URL de retour Google de cet ID et
+l'ajoute au binaire.
 L'erreur Android `10` / `DEVELOPER_ERROR` indique généralement un client OAuth,
 un package ou une empreinte SHA manquante/incohérente. Ne transmettez pas le
 keystore ni sa clé privée à Firebase, GitHub variables ou au dépôt.
